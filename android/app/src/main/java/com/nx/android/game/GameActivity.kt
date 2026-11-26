@@ -70,6 +70,7 @@ import com.nx.android.data.AppLocale
 import com.nx.android.data.AppLog
 import com.nx.android.data.CheatRepo
 import com.nx.android.data.CheatSettings
+import com.nx.android.data.DevSync
 import com.nx.android.data.FrameGenSettings
 import com.nx.android.data.GameLog
 import com.nx.android.data.Gamespec
@@ -581,6 +582,10 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
             }
         }
         try { writer?.close() } catch (e: Exception) {}
+        if (PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, false)) {
+            val tid = packTitleId ?: LibraryFileScanner.manifestTitleId(pack).orEmpty()
+            runCatching { DevSync.mirrorLogs(pack, tid) }
+        }
         // 重建是这局的事：记进那局的档案（玩家问「刚才为什么重编了一遍」时查得到）
         Gamespec.appendEvent(
             paths.nxHome,
@@ -1266,7 +1271,11 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         locale.configurationChanged()
-    }    override fun onPause() { super.onPause(); if (gameUiReady) Native.lifecycle(0) }
+    }    override fun onPause() {
+        super.onPause()
+        if (gameUiReady) Native.lifecycle(0)
+        mirrorLogsAsync()
+    }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) immersive()
@@ -1282,6 +1291,14 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
         super.onDestroy()
     }
 
+    private fun mirrorLogsAsync() {
+        val pack = packPath?.let(::File) ?: return
+        val tid = packTitleId ?: LibraryFileScanner.manifestTitleId(pack) ?: return
+        if (!PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, false)) return
+        prepareScope.launch(Dispatchers.IO) {
+            runCatching { DevSync.mirrorLogs(pack, tid) }
+        }
+    }
 
     /**
      * 这一页没了，进程也走：宿主在一个进程里只能跑一次（见类注释）。
@@ -1289,6 +1306,7 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
      * 库页会以为游戏还在跑（点「运行」就会去回到一个已经不在的页面）。
      */
     private fun endProcess() {
+        mirrorLogsAsync()
         finish()
         Handler(Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, 300)
     }

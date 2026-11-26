@@ -47,6 +47,7 @@ import com.nx.android.agent.ui.AgentSettingsSection
 import com.nx.android.agent.ui.AgentSettingsViewModel
 import com.nx.android.feature.updates.UpdateViewModel
 import com.nx.android.data.AppLocale
+import com.nx.android.data.DevSync
 import com.nx.android.domain.drivers.Driver
 import com.nx.android.domain.drivers.DriverRepository
 import com.nx.android.data.LosslessDll
@@ -344,6 +345,8 @@ private fun AboutSection(ob: OnboardingState, update: UpdateViewModel, actions: 
     val locale = LocalAppLocale.current
     // 文件管理器能不能看见 App 的私有目录（运行时、存档、日志）。这一份跟着设置走。
     var fileProviderOn by remember { mutableStateOf(actions.fileProvider()) }
+    var devSyncOn by remember { mutableStateOf(actions.devAutoSync()) }
+    val devPath = remember { DevSync.defaultDevRoot().absolutePath }
 
     // 版本号点一下去 GitHub 仓库
     InfoRow(title = stringResource(R.string.set_version), value = actions.version(), onClick = { openRepo(ctx) })
@@ -377,6 +380,23 @@ private fun AboutSection(ob: OnboardingState, update: UpdateViewModel, actions: 
         label = stringResource(R.string.set_run_onboarding),
         note = stringResource(R.string.set_rerun_onboarding_hint),
     ) { ob.open() }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    SubtitleRow(stringResource(R.string.set_dev_section))
+    SwitchRow(
+        title = stringResource(R.string.set_dev_sync_title),
+        checked = devSyncOn,
+        note = stringResource(R.string.set_dev_sync_note, devPath),
+        onChange = { on ->
+            actions.onSetDevAutoSync(on)
+            devSyncOn = on
+        },
+    )
+    ActionRow(
+        title = stringResource(R.string.set_dev_sync_launch_title),
+        label = stringResource(R.string.set_dev_sync_launch_label),
+        note = stringResource(R.string.set_dev_sync_launch_note),
+        enabled = devSyncOn,
+    ) { actions.onDevSyncAndLaunch() }
 }
 
 /** 语言那一行中间的值：当前是哪一档 */

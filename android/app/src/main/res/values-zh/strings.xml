@@ -859,4 +859,13 @@
     <string name="agent_copied">已复制</string>
     <string name="agent_panel_collapse">收起助手</string>
     <string name="agent_panel_expand">打开完整对话</string>
+    <string name="set_dev_section">开发者 / Termux</string>
+    <string name="set_dev_sync_title">开发自动同步与直启</string>
+    <string name="set_dev_sync_note">启动前从 %1$s 自动同步 env.txt、RomFS/user.cfg、着色器与预编译 .so 运行库，将游戏日志回写至 logs/，并允许 Termux 通过 am start 直接启动游戏。</string>
+    <string name="set_dev_sync_launch_title">立即同步并启动游戏</string>
+    <string name="set_dev_sync_launch_label">同步并启动</string>
+    <string name="set_dev_sync_launch_note">从共享存储拉取覆盖文件、回写日志并直接启动已暂存的游戏。</string>
+    <string name="dev_sync_disabled_toast">请先在「设置 → 关于」中开启「开发自动同步与直启」</string>
+    <string name="dev_launch_no_target">未找到可启动的已移植游戏</string>
+    <string name="dev_sync_done_toast">开发同步完成：%1$d 个文件、%2$d 个运行库、%3$d 份日志</string>
 </resources>

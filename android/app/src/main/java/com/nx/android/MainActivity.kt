@@ -55,6 +55,7 @@ import com.nx.android.data.AppLocale
 import com.nx.android.data.AppLog
 import com.nx.android.data.AppVersion
 import com.nx.android.data.CheatRepo
+import com.nx.android.data.DevSync
 import com.nx.android.data.Gamespec
 import com.nx.android.data.LogBundle
 import com.nx.android.data.Player
@@ -63,6 +64,7 @@ import com.nx.android.data.porting.BuildSessionRepository
 import com.nx.android.core.storage.AppPaths
 import androidx.core.content.FileProvider
 import com.nx.android.data.library.LibraryFileScanner
+import com.nx.android.domain.GameEntry
 import com.nx.android.domain.GameIdentity
 import com.nx.android.domain.LaunchDecision
 import com.nx.android.domain.LibraryLogic
@@ -165,6 +167,7 @@ class MainActivity : ComponentActivity() {
 
     /** 上一次那个游戏闪退了：弹框把那三条路摆出来（重新构建 / 重新移植 / 反馈） */
     private var crash by mutableStateOf<CrashReport?>(null)
+    private var devLaunching = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -192,6 +195,9 @@ class MainActivity : ComponentActivity() {
         // 桌面快捷方式的点击（冷启动这一条）：与库页卡片走同一扇门
         if (intent?.action == GameShortcuts.ACTION) {
             intent.getStringExtra(GameShortcuts.EXTRA_TITLE_ID)?.let { onShortcut(it) }
+        }
+        if (intent?.action == DevSync.ACTION_LAUNCH) {
+            handleDevLaunch(intent)
         }
         setContent {
             AppRoot(prefs, locale, port, library, onboarding, drivers, environmentSetup, actions,
@@ -287,6 +293,12 @@ class MainActivity : ComponentActivity() {
         // 文件管理器能不能看见 App 的私有目录（运行时、存档、日志）。文档提供器自己读这份设置。
         fileProvider = { prefs.bool(PrefsStore.FILE_PROVIDER, true) },
         onSetFileProvider = { on -> prefs.put(PrefsStore.FILE_PROVIDER, on) },
+        devAutoSync = { prefs.bool(PrefsStore.DEV_AUTO_SYNC, false) },
+        onSetDevAutoSync = { on ->
+            prefs.put(PrefsStore.DEV_AUTO_SYNC, on)
+            if (on) AppLog.line("dev: Auto-Sync + Direct Launch enabled (${DevSync.defaultDevRoot().absolutePath})")
+        },
+        onDevSyncAndLaunch = { triggerDevSyncAndLaunch() },
         onShareBuildLog = { id ->
             lifecycleScope.launch {
                 val session = port.history.firstOrNull { it.id == id }
@@ -399,8 +411,8 @@ class MainActivity : ComponentActivity() {
      *
      * @param rebuild 重建运行库再开（闪退后的「重新构建」）：门还是那一扇，只是游戏页多了一件差事
      */
-    private fun runGate(pack: File, name: String, rebuild: Boolean = false) {
-        LibraryFileScanner.portFromPack(pack)?.let { ported ->
+    private fun runGate(pack: File, name: String, rebuild: Boolean = false, alreadySynced: Boolean = false) {
+        LibraryFileScanner.portFromPack(pack, paths.runtimes)?.let { ported ->
             when (LibraryLogic.launchDecision(player.processAlive(this), player.currentTitleId(), ported.titleId)) {
                 // 跑的正是这一个：带回前台，不重启
                 LaunchDecision.RESUME -> GameActivity.resume(this)
@@ -411,7 +423,7 @@ class MainActivity : ComponentActivity() {
                           else locale.str(R.string.lib_game_still_running, player.currentName()))
                 }
                 // 没有游戏在跑：全新启动
-                LaunchDecision.START -> launchStart(ported, name, rebuild)
+                LaunchDecision.START -> launchStart(ported, name, rebuild, alreadySynced)
             }
         } ?: toast(locale.str(R.string.main_cannot_run_not_a_pack, pack.name))
     }
@@ -424,37 +436,174 @@ class MainActivity : ComponentActivity() {
     private fun onShortcut(titleId: String) {
         if (resolveShortcutByMemory(titleId)) { if (!isTaskRoot) finish(); return }
         lifecycleScope.launch {
-            val games = snapshotFlow { library.scanning to library.games }
-                .filter { (scanning, games) -> scanning || games.isNotEmpty() }   // 扫描中，或已经有卡
-                .map { (scanning, games) -> if (scanning) null else games }        // 扫描结束后交出结果
-                .filterNotNull()
-                .first()
-            val hit = games.firstOrNull { it.titleId.equals(titleId, ignoreCase = true) }?.pack
+            val hit = awaitLibraryGames().firstOrNull { it.titleId.equals(titleId, ignoreCase = true) }?.pack
             if (hit != null) runGate(hit.pack, hit.name)
             else toast(locale.str(R.string.shortcut_disabled))
             if (!isTaskRoot) finish()   // 叠在游戏页上面的那份多余实例退掉：任务里还是 游戏页 > 库页
         }
     }
 
+    private suspend fun awaitLibraryGames(): List<GameEntry> =
+        snapshotFlow { library.scanning to library.games }
+            .filter { (scanning, games) -> scanning || games.isNotEmpty() }   // 扫描中，或已经有卡
+            .map { (scanning, games) -> if (scanning) null else games }        // 扫描结束后交出结果
+            .filterNotNull()
+            .first()
+
     /** 按记住的包路径验证一次（不等库扫描）：命中就过门 */
     private fun resolveShortcutByMemory(titleId: String): Boolean {
-        val path = try { prefs.json(PrefsStore.LIB_PACKS).optString(titleId.uppercase()) } catch (_: Exception) { "" }
-        if (path.isEmpty()) return false
-        val ported = LibraryFileScanner.portFromPack(File(path)) ?: return false
-        if (!ported.titleId.equals(titleId, ignoreCase = true)) return false
+        val ported = resolvePortedByMemory(titleId) ?: return false
         runGate(ported.pack, ported.name)
         return true
+    }
+
+    private fun resolvePortedByMemory(titleId: String): Ported? {
+        val path = try { prefs.json(PrefsStore.LIB_PACKS).optString(titleId.uppercase()) } catch (_: Exception) { "" }
+        if (path.isEmpty()) return null
+        val ported = LibraryFileScanner.portFromPack(File(path), paths.runtimes) ?: return null
+        return ported.takeIf { it.titleId.equals(titleId, ignoreCase = true) }
+    }
+
+    /**
+     * Termux / shell direct launch (`am start -n com.nx.android/.MainActivity -a com.nx.android.action.DEV_LAUNCH`):
+     * gated behind `PrefsStore.DEV_AUTO_SYNC` (off by default in release builds). Syncs overrides + prebuilt
+     * runtimes from `/sdcard/Download/nx2android/dev/<TITLE_ID>/`, mirrors logs, and launches directly.
+     */
+    private fun handleDevLaunch(intent: Intent) {
+        if (!prefs.bool(PrefsStore.DEV_AUTO_SYNC, false)) {
+            AppLog.line("[RED] dev: ignored DEV_LAUNCH while Dev Auto-Sync is disabled")
+            toast(locale.str(R.string.dev_sync_disabled_toast))
+            return
+        }
+        if (!storageGranted()) {
+            toast(locale.str(R.string.builds_needs_storage))
+            askStorage()
+            return
+        }
+        val explicitPack = intent.getStringExtra(DevSync.EXTRA_PACK)?.trim().orEmpty()
+        val explicitTitleId = intent.getStringExtra(DevSync.EXTRA_TITLE_ID)?.trim().orEmpty()
+        val doSync = intent.getBooleanExtra(DevSync.EXTRA_SYNC, true)
+        val rebuild = intent.getBooleanExtra(DevSync.EXTRA_REBUILD, false)
+        val doLaunch = intent.getBooleanExtra(DevSync.EXTRA_LAUNCH, true)
+
+        lifecycleScope.launch {
+            val fastPorted = when {
+                explicitPack.isNotEmpty() -> LibraryFileScanner.portFromPack(File(explicitPack), paths.runtimes)
+                explicitTitleId.isNotEmpty() -> resolvePortedByMemory(explicitTitleId)
+                else -> null
+            }
+            val games = if (fastPorted != null) library.games else awaitLibraryGames()
+            val target = fastPorted?.let { it to it.name.ifBlank { it.titleId } }
+                ?: resolveDevTarget(games, explicitTitleId)
+
+            if (target == null) {
+                if (!doSync || doLaunch) toast(locale.str(R.string.dev_launch_no_target))
+                if (!isTaskRoot) finish()
+                return@launch
+            }
+            val (ported, displayName) = target
+            if (doSync) {
+                val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths) }
+                AppLog.line("dev: sync ${res.titleId} -> files=${res.filesSynced}, runtime=${res.runtimeSynced}, logs=${res.logsMirrored}")
+                library.rescan()
+                if (!doLaunch) {
+                    toast(locale.str(R.string.dev_sync_done_toast, res.filesSynced, res.runtimeSynced, res.logsMirrored))
+                    if (!isTaskRoot) finish()
+                    return@launch
+                }
+            }
+            if (doLaunch) {
+                runGate(ported.pack, displayName, rebuild = rebuild, alreadySynced = doSync)
+            }
+            if (!isTaskRoot) finish()
+        }
+    }
+
+    private fun triggerDevSyncAndLaunch() {
+        if (!prefs.bool(PrefsStore.DEV_AUTO_SYNC, false)) {
+            toast(locale.str(R.string.dev_sync_disabled_toast))
+            return
+        }
+        if (!storageGranted()) {
+            toast(locale.str(R.string.builds_needs_storage))
+            askStorage()
+            return
+        }
+        lifecycleScope.launch {
+            if (!library.scanning && library.games.isEmpty()) library.rescan()
+            val games = if (!library.scanning && library.games.isNotEmpty()) library.games else awaitLibraryGames()
+            val portedPacks = games.mapNotNull { g -> g.pack?.let { it to g.label } }
+            val (files, runtime, logs) = withContext(Dispatchers.IO) {
+                var f = 0; var r = 0; var l = 0
+                for ((p, _) in portedPacks) {
+                    val res = DevSync.syncGame(p, paths)
+                    f += res.filesSynced; r += res.runtimeSynced; l += res.logsMirrored
+                }
+                Triple(f, r, l)
+            }
+            library.rescan()
+            AppLog.line("dev: manual sync -> files=$files, runtime=$runtime, logs=$logs")
+            toast(locale.str(R.string.dev_sync_done_toast, files, runtime, logs))
+            val target = resolveDevTarget(games, "")
+            if (target != null) {
+                runGate(target.first.pack, target.second, alreadySynced = true)
+            } else if (portedPacks.isEmpty()) {
+                toast(locale.str(R.string.dev_launch_no_target))
+            }
+        }
+    }
+
+    private fun resolveDevTarget(games: List<GameEntry>, titleId: String): Pair<Ported, String>? {
+        if (titleId.isNotEmpty()) {
+            val hit = games.firstOrNull { it.titleId.equals(titleId, ignoreCase = true) && it.pack != null }
+            return hit?.pack?.let { it to hit.label }
+        }
+        for (stagedId in DevSync.stagedTitleIds(DevSync.defaultDevRoot())) {
+            val hit = games.firstOrNull { it.titleId.equals(stagedId, ignoreCase = true) && it.pack != null }
+            if (hit?.pack != null) return hit.pack to hit.label
+        }
+        val portedOnly = games.filter { it.pack != null }
+        if (portedOnly.size == 1) {
+            val only = portedOnly.first()
+            return only.pack!! to only.label
+        }
+        return null
     }
 
     /**
      * 门放行的 START：占用检查（构建占用着流水线）→ 账本标记（fail-safe 断言住在这里）→ 把包交给
      * 游戏页。宿主的指纹检查与运行库重建都发生在游戏页自己的 prepare 里（旧版宿主在那儿就地重建）。
      */
-    private fun launchStart(ported: Ported, name: String, rebuild: Boolean = false) {
+    private fun launchStart(ported: Ported, name: String, rebuild: Boolean = false, alreadySynced: Boolean = false) {
         if (port.running) {
             toast(locale.str(R.string.runtime_busy))
             return
         }
+        if (devLaunching) return
+        if (!alreadySynced && prefs.bool(PrefsStore.DEV_AUTO_SYNC, false)) {
+            if (!storageGranted()) {
+                toast(locale.str(R.string.builds_needs_storage))
+                askStorage()
+                return
+            }
+            devLaunching = true
+            lifecycleScope.launch {
+                try {
+                    val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths) }
+                    if (res.filesSynced > 0 || res.runtimeSynced > 0 || res.logsMirrored > 0) {
+                        AppLog.line("dev: pre-launch sync ${res.titleId} -> files=${res.filesSynced}, runtime=${res.runtimeSynced}, logs=${res.logsMirrored}")
+                    }
+                    startPlayerNow(ported, name, rebuild)
+                } finally {
+                    devLaunching = false
+                }
+            }
+            return
+        }
+        startPlayerNow(ported, name, rebuild)
+    }
+
+    private fun startPlayerNow(ported: Ported, name: String, rebuild: Boolean) {
         prefs.put(PrefsStore.PLAYER_LAST_START, System.currentTimeMillis().toString())
         player.markLaunched(ported.titleId, name)   // 冷启动读回的身份（进程活着时它就是答案）
         Player.run(this, ported, name, rebuild) { ok ->
@@ -470,6 +619,12 @@ class MainActivity : ComponentActivity() {
         envCheck.refresh()
         // 回到库页：卡片重扫一遍（游戏页的 prepare 会在背后升级包）
         library.rescan()
+        if (prefs.bool(PrefsStore.DEV_AUTO_SYNC, false) && onboarding.storageOk) {
+            val packs = library.games.mapNotNull { it.pack }
+            if (packs.isNotEmpty()) {
+                lifecycleScope.launch(Dispatchers.IO) { DevSync.mirrorAllLogs(packs) }
+            }
+        }
         if (Build.VERSION.SDK_INT >= 30) {
             val started = prefs.str(PrefsStore.PLAYER_LAST_START).toLongOrNull() ?: 0L
             // 崩溃检测也问账本：processAlive() 是账本给全 app 的同步出口（账本之外没有第二处进程判断）
@@ -614,6 +769,9 @@ class MainActivity : ComponentActivity() {
         // 桌面快捷方式的点击（热启动这一条）
         if (intent.action == GameShortcuts.ACTION) {
             intent.getStringExtra(GameShortcuts.EXTRA_TITLE_ID)?.let { onShortcut(it) }
+        }
+        if (intent.action == DevSync.ACTION_LAUNCH) {
+            handleDevLaunch(intent)
         }
     }
 
