@@ -206,6 +206,7 @@ void qa_vk_on_draw(uint64_t frame_no, uint64_t vs, uint64_t fs) {
 
 void qa_vk_on_dispatch(uint64_t frame_no, uint64_t cs) {
     if (!qa_dev_enabled()) return;
+    if (!frame_no) frame_no = qa_current_frame();
     pthread_mutex_lock(&g_meta_mu);
     qa_frame_meta_t *m = meta_slot(frame_no);
     m->dispatches++;

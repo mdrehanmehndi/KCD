@@ -42,6 +42,8 @@ static int crumbs_on(void) { return 0; }
 static crumb_t *crumb_cur(void) { abort(); }
 static void crumb_mark(int n) { abort(); }
 void vk_pass_ts(int a, uint32_t b, uint32_t c, uint32_t d, uint32_t e) {}
+int qa_dev_enabled(void) { return 0; }
+void qa_vk_on_dispatch(uint64_t f, uint64_t cs) { (void)f; (void)cs; }
 int vk_readback_ranges(void) { return 0; }
 void vk_readback_unknown(void) { abort(); }
 void vk_gpu_wrote(uint64_t a, uint64_t n) {}

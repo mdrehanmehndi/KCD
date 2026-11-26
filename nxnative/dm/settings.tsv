@@ -24,6 +24,10 @@ DM_DBG	str		debug	?	main.c
 DM_DBG_AU_FRAMES	int		debug	?	hle_audio.c	diagnostic: on the Mac, make the sound card callback ask N frames each time (1024 = the iOS default, reproduces the crackling)
 DM_DETCLOCK	str		debug	?	hle_nvn.c hle_os.c	
 DM_DETCLOCK_PACE	bool		debug	?	hle_nvn.c	
+DM_DEV_AUTO_FLICKER	bool	0	debug	live	qa_dev.c	enable in-game Dev overlay 16x16 V-shape Auto-Flicker Detector
+DM_DEV_DIR	str		debug	start	qa_dev.c	override developer QA output root for tests (default /sdcard/Download/nx2a_dev/<tid>)
+DM_DEV_QA	bool	0	app	start	qa_dev.c	activate native Dev QA ring buffer, glitch capture, and input replay
+DM_DEV_REPLAY	bool	0	app	start	qa_dev.c	start automatic stress_test.rec replay on launch when DM_DEV_QA=1
 DM_DYN_SCALE	str		profile	live	hle_nvn.c	the host's dynamic resolution: a level for a profile's env row, `low` (lowest scale 0.85 against 90% of the frame time), `medium` (0.70, 85%) or `high` (0.50, 80%), or a number, the lowest scale (0.5 to 0.95, 85% budget); 0 or unset = off. In a game with a render-scale stub: every 30 frames held at the cap, GPU p90 over the budget lowers the scale 0.05, under 70% of it raises it (Tears of the Kingdom's pond: 1.0 -> 0.6 saved only 2.6 ms of GPU p90). In a game without one (no state page) it steers the engine's own dynamic resolution: the GPU clock the game reads (nvnDeviceGetTimestampInNanoseconds, GetCurrentTimestampInNanoseconds) runs k times as fast, k between 1 and 1 / (lowest scale)², raised 15% while GPU p90 is over the budget and lowered under 70% of it, the budget taken at 30 fps under a 30 fps ceiling (hle_nvn.c engine_dyn_tick). Only for engines whose resolution controller reads NVN counter timestamps (Pokémon Scarlet / Violet); a game that paces frames on them would be thrown off
 DM_ENV_FILE_KEYS	str		app,ios	start	main.m	the iOS launcher: the keys an env file set (Launcher.swift keeps them)
 DM_FD_LOG	int		debug	?	hle_fdstat.c	
@@ -300,6 +304,7 @@ DM_VK_PACE_LOG	bool		debug	live	gfx_vk_present.c	logs the display pacing every 6
 DM_VK_PASSDUMP	bool		debug	live	gfx_vk_exec.c	dump each pass's first colour target and its depth (PPM, NaN counts, depth stretched) for one frame; `=N` waits N−1 presents first. **The dump adds barriers and depth reads, which can hide bugs**
 DM_VK_PASSDUMP_CROP	str		debug	live	gfx_vk_exec.c	Copy only this bounded rectangle of the selected colour image, reducing memory and disk use for temporal numeric probes. Origin is logged; an empty value restores full images.
 DM_VK_PASSDUMP_DEPTH	bool		debug	start	gfx_vk_exec.c	with `DM_VK_PASSDUMP_SIZE`, the size-filtered passes' depth too; every depth dump also writes its raw values as float32 (`<name>.f32` beside the PPM)
+DM_VK_PASSDUMP_DIR	str		debug	live	gfx_vk_exec_passes.inc	override pass dump output folder (used by Dev QA 1-tap passdump)
 DM_VK_PASSDUMP_FMT	str		debug	live	gfx_vk_exec.c	only these pass numbers of each submission / only passes whose first two colour formats are VkFormat a and b (pass numbers move from frame to frame; TTYD's first lit pass is `122/64`), to follow one pass over many frames
 DM_VK_PASSDUMP_FRAMES	bool		debug	start	gfx_vk_exec.c	keep dumping for N presents in a row (up to 96 dumps; the log names each dump's present): with `DM_VK_PASSDUMP_SIZE`, catches an effect that is wrong in single frames
 DM_VK_PASSDUMP_FS	str		debug	live	gfx_vk_exec.c	Only dump colour passes whose last draw has one of these fragment shader keys. With `DM_VK_X_CUTFS`, samples immediately before/after a draw across frames.
