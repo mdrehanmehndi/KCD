@@ -34,12 +34,13 @@ object Player {
      *
      * @param rebuild 重建运行库再开（游戏闪退后玩家点的「重新构建」）：目录里那份对不上也不将就
      */
-    fun run(activity: Activity, port: Ported, name: String, rebuild: Boolean = false, onReady: (Boolean) -> Unit) {
+    fun run(activity: Activity, port: Ported, name: String, rebuild: Boolean = false, devReplay: Boolean = false, onReady: (Boolean) -> Unit) {
         val i = Intent(activity, GameActivity::class.java)
             .putExtra(GameActivity.EXTRA_PACK, port.pack.absolutePath)
             .putExtra(GameActivity.EXTRA_TITLE_ID, port.titleId)
             .putExtra(GameActivity.EXTRA_NAME, name)
         if (rebuild) i.putExtra(GameActivity.EXTRA_REBUILD, true)
+        if (devReplay) i.putExtra(DevSync.EXTRA_DEV_REPLAY, true)
         activity.startActivity(i)
         onReady(true)
     }

@@ -4,6 +4,7 @@
 // DM_VK_SHOT_DIR (default DM_ROOT), which is how a run without a screen is checked.
 #include "gfx_vk.h"
 #include "dm_pacing.h"   // the frame-pacing policy
+#include "qa_dev.h"
 #include <android/native_window.h>
 #include <jni.h>
 #include <string.h>
@@ -1004,6 +1005,7 @@ static void present_one(vkimg_t *im, VkImage src, int cx, int cy, int cw, int ch
     // 30 ms at most and give the frame up; the next redraw, 33 ms on, tries again with the newest state. Game frames still wait without a bound
     uint64_t wt = period < 0 ? 30000000ull : UINT64_MAX;
     if (vkWaitForFences(V.dev, 1, &g_pfence[k], 1, wt) == VK_TIMEOUT) return;
+    if (qa_dev_enabled()) { void qa_vk_poll_completed(VkFence *fences); qa_vk_poll_completed(g_pfence); }
     if (with_meta && im_meta_srgb && im_meta_srgb != g_want) { g_want = im_meta_srgb; swap_destroy(); if (!swap_make()) return; }   // once, at the first present of the other kind
     uint32_t idx; VkResult r = vkAcquireNextImageKHR(V.dev, g_swap, wt, g_acq[k], VK_NULL_HANDLE, &idx);
     if (r == VK_TIMEOUT) return;   // (a redraw that could not get an image in time: the next one presents this state)
@@ -1025,6 +1027,7 @@ static void present_one(vkimg_t *im, VkImage src, int cx, int cy, int cw, int ch
     VkImageBlit b = {{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {{cx, cy, 0}, {cx + cw, cy + ch, 1}}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {{dx, dy, 0}, {dx + dw, dy + dh, 1}}};
     if (flip && vk_window_bottom_up()) { b.srcOffsets[0].y = cy + ch; b.srcOffsets[1].y = cy; }   // lower-left origin: the window image is stored bottom-up (gfx_vk_exec.c)
     if (im && im->layout == VK_IMAGE_LAYOUT_UNDEFINED) { barrier(cb, im->img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL); im->layout = VK_IMAGE_LAYOUT_GENERAL; }   // an imported frame buffer, first shown (gl_android.c)
+    if (with_meta && im && qa_dev_enabled()) { void qa_vk_record_frame_copy(VkCommandBuffer, uint32_t, vkimg_t *, int, int, int, int, int, uint64_t); qa_vk_record_frame_copy(cb, k, im, cx, cy, cw, ch, flip && vk_window_bottom_up(), ticket); }
     vkCmdBlitImage(cb, src, VK_IMAGE_LAYOUT_GENERAL, tgt, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, VK_FILTER_LINEAR);
     VkImageLayout lay = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     int external = dm_external_active();
@@ -1266,6 +1269,7 @@ uint64_t mtl_present(const tex_t *t, double period, const int crop[4]) {
     if (!im) { no_img++; return present_enqueue(NULL, NULL, n, period); }
     if (im->layout != VK_IMAGE_LAYOUT_GENERAL) { undrawn++; return present_enqueue(NULL, NULL, n, period); }   // never drawn into: nothing to show yet
     shown++;
+    qa_set_present_frame(n); qa_input_on_present_tick();
     if (shot_wanted(n)) shot(im, n);
     { void vk_pass_dump_poll(uint64_t done); uint64_t vk_fence_done(void); vk_pass_dump_poll(vk_fence_done()); void vk_pass_frame(void); vk_pass_frame(); void vk_tex_sweep(void); vk_tex_sweep(); }
     if (n % 1800 == 0) {   // every ~30 s: the pipeline cache to disk on a thread of its own (an Android app can be killed without any exit path)
@@ -1309,6 +1313,7 @@ uint64_t vk_present_vkimg(vkimg_t *im, double period) {
     { int disp = V.has_dtiming && dm_front_window() && (n <= 240 || g_pres_recorded); struct timespec ts; if (!disp) clock_gettime(CLOCK_MONOTONIC, &ts);
       present_time_begin(n, disp ? 0 : (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec); }
     atomic_fetch_add(&g_fps_frames, 1);
+    qa_set_present_frame(n); qa_input_on_present_tick();
     if (shot_wanted(n) && im->layout == VK_IMAGE_LAYOUT_GENERAL) shot(im, n);
     return present_enqueue(im, NULL, n, period);
 }

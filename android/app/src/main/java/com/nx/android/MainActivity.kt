@@ -422,7 +422,7 @@ class MainActivity : ComponentActivity() {
      *
      * @param rebuild 重建运行库再开（闪退后的「重新构建」）：门还是那一扇，只是游戏页多了一件差事
      */
-    private fun runGate(pack: File, name: String, rebuild: Boolean = false, alreadySynced: Boolean = false) {
+    private fun runGate(pack: File, name: String, rebuild: Boolean = false, alreadySynced: Boolean = false, devReplay: Boolean = false) {
         LibraryFileScanner.portFromPack(pack, paths.runtimes)?.let { ported ->
             when (LibraryLogic.launchDecision(player.processAlive(this), player.currentTitleId(), ported.titleId)) {
                 // 跑的正是这一个：带回前台，不重启
@@ -434,7 +434,7 @@ class MainActivity : ComponentActivity() {
                           else locale.str(R.string.lib_game_still_running, player.currentName()))
                 }
                 // 没有游戏在跑：全新启动
-                LaunchDecision.START -> launchStart(ported, name, rebuild, alreadySynced)
+                LaunchDecision.START -> launchStart(ported, name, rebuild, alreadySynced, devReplay)
             }
         } ?: toast(locale.str(R.string.main_cannot_run_not_a_pack, pack.name))
     }
@@ -479,22 +479,22 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return false
         if (intent.action == DevSync.ACTION_LAUNCH || intent.action == DevSync.LEGACY_ACTION_LAUNCH) return true
         val data = intent.data
-        return intent.action == Intent.ACTION_VIEW && data?.scheme == "nx2a" && data.host == "launch"
+        return intent.action == Intent.ACTION_VIEW && data?.scheme == DevSync.SCHEME_LAUNCH && data.host == "launch"
     }
 
     private fun extractDevTitleId(intent: Intent): String {
         val fromExtra = intent.getStringExtra(DevSync.EXTRA_TITLE_ID)?.trim().orEmpty()
         if (fromExtra.isNotEmpty()) return fromExtra
         val data = intent.data
-        if (data?.scheme == "nx2a" && data.host == "launch") {
+        if (data?.scheme == DevSync.SCHEME_LAUNCH && data.host == "launch") {
             return data.lastPathSegment?.trim().orEmpty()
         }
         return ""
     }
 
     /**
-     * Termux / shell direct launch (`am start -a com.nx.android.ACTION_DEV_LAUNCH --es title_id ...`
-     * or `nx2a://launch/<title_id>`). Runs pre-launch sync from `/sdcard/Download/nx2a_dev/<title_id>/`
+     * Termux / shell direct launch (`am start -a com.rehan.kcdplay.ACTION_DEV_LAUNCH --es title_id ...`
+     * or `kcdplay://launch/<title_id>`). Runs pre-launch sync from `/sdcard/Download/nx2a_dev/<title_id>/`
      * when All Files Access is granted and starts the game directly into play mode.
      */
     private fun handleDevLaunch(intent: Intent) {
@@ -513,8 +513,16 @@ class MainActivity : ComponentActivity() {
         val doSync = intent.getBooleanExtra(DevSync.EXTRA_SYNC, true)
         val rebuild = intent.getBooleanExtra(DevSync.EXTRA_REBUILD, false)
         val doLaunch = intent.getBooleanExtra(DevSync.EXTRA_LAUNCH, true)
+        val devReplay = intent.getBooleanExtra(DevSync.EXTRA_DEV_REPLAY, false)
+        val waitExitMs = intent.getLongExtra("wait_exit_ms", 0L).coerceIn(0L, 2500L)
 
         lifecycleScope.launch {
+            if (waitExitMs > 0L) {
+                val deadline = System.currentTimeMillis() + waitExitMs
+                while (player.processAlive(this@MainActivity) && System.currentTimeMillis() < deadline) {
+                    delay(80)
+                }
+            }
             val fastPorted = when {
                 explicitPack.isNotEmpty() -> LibraryFileScanner.portFromPack(File(explicitPack), paths.runtimes)
                 explicitTitleId.isNotEmpty() -> resolvePortedByMemory(explicitTitleId)
@@ -546,7 +554,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             if (doLaunch) {
-                runGate(ported.pack, displayName, rebuild = rebuild, alreadySynced = doSync)
+                runGate(ported.pack, displayName, rebuild = rebuild, alreadySynced = doSync, devReplay = devReplay)
             }
             if (!isTaskRoot) finish()
         }
@@ -621,7 +629,7 @@ class MainActivity : ComponentActivity() {
      * 门放行的 START：占用检查（构建占用着流水线）→ 账本标记（fail-safe 断言住在这里）→ 把包交给
      * 游戏页。宿主的指纹检查与运行库重建都发生在游戏页自己的 prepare 里（旧版宿主在那儿就地重建）。
      */
-    private fun launchStart(ported: Ported, name: String, rebuild: Boolean = false, alreadySynced: Boolean = false) {
+    private fun launchStart(ported: Ported, name: String, rebuild: Boolean = false, alreadySynced: Boolean = false, devReplay: Boolean = false) {
         if (port.running) {
             toast(locale.str(R.string.runtime_busy))
             return
@@ -635,20 +643,20 @@ class MainActivity : ComponentActivity() {
                     val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths, this@MainActivity) }
                     logDevSyncResult(res)
                     val refreshed = LibraryFileScanner.portFromPack(ported.pack, paths.runtimes) ?: ported
-                    startPlayerNow(refreshed, name, rebuild)
+                    startPlayerNow(refreshed, name, rebuild, devReplay)
                 } finally {
                     devLaunching = false
                 }
             }
             return
         }
-        startPlayerNow(ported, name, rebuild)
+        startPlayerNow(ported, name, rebuild, devReplay)
     }
 
-    private fun startPlayerNow(ported: Ported, name: String, rebuild: Boolean) {
+    private fun startPlayerNow(ported: Ported, name: String, rebuild: Boolean, devReplay: Boolean = false) {
         prefs.put(PrefsStore.PLAYER_LAST_START, System.currentTimeMillis().toString())
         player.markLaunched(ported.titleId, name)   // 冷启动读回的身份（进程活着时它就是答案）
-        Player.run(this, ported, name, rebuild) { ok ->
+        Player.run(this, ported, name, rebuild, devReplay) { ok ->
             if (!ok) toast(locale.str(R.string.main_cannot_run_no_host, ported.pack.name) + "\n" + locale.str(R.string.runtime_play_failed))
         }
     }

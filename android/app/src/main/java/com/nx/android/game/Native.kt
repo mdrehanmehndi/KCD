@@ -170,4 +170,15 @@ object Native {
 
     /** 关掉金手指：宿主不再加载也不再执行 */
     @JvmStatic external fun cheatsClose()
+
+    /** Developer QA overlay hooks (qa_dev.c) */
+    @JvmStatic external fun qaSupported(): Boolean
+    @JvmStatic external fun qaStatus(): String
+    @JvmStatic external fun qaFlagGlitch(source: String): Int
+    @JvmStatic external fun qaSetAutoFlicker(on: Boolean)
+    @JvmStatic external fun qaStartRecord(): Boolean
+    @JvmStatic external fun qaStartReplay(): Boolean
+    @JvmStatic external fun qaStopInput()
+    @JvmStatic external fun qaDumpPasses(): Boolean
+    @JvmStatic external fun qaFlushShaders(): Int
 }

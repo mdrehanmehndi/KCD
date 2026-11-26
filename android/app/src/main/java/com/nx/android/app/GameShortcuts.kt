@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.nx.android.BuildConfig
 import com.nx.android.MainActivity
 import com.nx.android.R
 import com.nx.android.domain.Ported
@@ -19,7 +20,7 @@ import com.nx.android.domain.Ported
 object GameShortcuts {
 
     /** the shortcut's intent lands here (MainActivity handles this action in onCreate and onNewIntent) */
-    const val ACTION = "com.nx.android.action.LAUNCH_GAME"
+    const val ACTION = "${BuildConfig.APPLICATION_ID}.action.LAUNCH_GAME"
     const val EXTRA_TITLE_ID = "shortcut_title_id"
 
     fun id(titleId: String): String = "game-${titleId.lowercase()}"

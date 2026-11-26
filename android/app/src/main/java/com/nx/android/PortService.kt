@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import com.nx.android.BuildConfig
 import com.nx.android.appstate.LibraryOperationCoordinator
 import com.nx.android.appstate.PortState
 import com.nx.android.appstate.porting.PortCompletionCoordinator
@@ -47,8 +48,8 @@ class PortService : Service() {
 
     companion object {
         const val CHANNEL = "nx2a_port"
-        const val ACTION_START = "com.nx.android.port.START"
-        const val ACTION_CANCEL = "com.nx.android.port.CANCEL"
+        const val ACTION_START = "${BuildConfig.APPLICATION_ID}.port.START"
+        const val ACTION_CANCEL = "${BuildConfig.APPLICATION_ID}.port.CANCEL"
         const val GAME = "game";
         const val KEYS = "keys"
         const val TOUCH = "touch";

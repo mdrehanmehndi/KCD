@@ -21,13 +21,15 @@ import java.io.File
  */
 object DevSync {
 
-    const val ACTION_LAUNCH = "com.nx.android.ACTION_DEV_LAUNCH"
-    const val LEGACY_ACTION_LAUNCH = "com.nx.android.action.DEV_LAUNCH"
+    const val ACTION_LAUNCH = "${BuildConfig.APPLICATION_ID}.ACTION_DEV_LAUNCH"
+    const val LEGACY_ACTION_LAUNCH = "${BuildConfig.APPLICATION_ID}.action.DEV_LAUNCH"
+    const val SCHEME_LAUNCH = "kcdplay"
     const val EXTRA_TITLE_ID = "title_id"
     const val EXTRA_PACK = "pack"
     const val EXTRA_SYNC = "sync"
     const val EXTRA_REBUILD = "rebuild"
     const val EXTRA_LAUNCH = "launch"
+    const val EXTRA_DEV_REPLAY = "dev_replay"
 
     const val DEV_SUBDIR = "nx2a_dev"
 
@@ -99,6 +101,62 @@ object DevSync {
             }
         }
         return if (out.isEmpty()) "" else out.joinToString("\n") + "\n"
+    }
+
+    /** Reads active KEY=VALUE pairs from an `env.txt` file (ignoring comments and blank lines). */
+    fun readEnvFlags(envFile: File): LinkedHashMap<String, String> {
+        val out = LinkedHashMap<String, String>()
+        if (!envFile.isFile) return out
+        val lines = runCatching { envFile.readText(Charsets.UTF_8).split('\n') }.getOrDefault(emptyList())
+        for (raw in lines) {
+            val line = raw.trimEnd('\r')
+            val key = envKeyOf(line) ?: continue
+            val eq = line.indexOf('=')
+            out[key] = line.substring(eq + 1).trim()
+        }
+        return out
+    }
+
+    /** Applies [updates] (null removes key) to [envFile] while preserving unrelated lines/comments. */
+    fun applyEnvUpdates(envFile: File, updates: Map<String, String?>): Boolean {
+        val existing = runCatching {
+            envFile.readText(Charsets.UTF_8).split('\n').map { it.trimEnd('\r') }
+        }.getOrDefault(emptyList())
+        val out = ArrayList<String>(existing.size + updates.size)
+        val handled = HashSet<String>()
+        for (line in existing) {
+            if (line.isEmpty() && out.lastOrNull()?.isEmpty() == true) continue
+            val key = envKeyOf(line)
+            if (key != null && updates.containsKey(key)) {
+                handled.add(key)
+                val v = updates[key]
+                if (v != null) out.add("$key=$v")
+            } else {
+                out.add(line)
+            }
+        }
+        while (out.isNotEmpty() && out.last().isEmpty()) out.removeAt(out.lastIndex)
+        for ((k, v) in updates) {
+            if (v != null && k !in handled) out.add("$k=$v")
+        }
+        val text = if (out.isEmpty()) "" else out.joinToString("\n") + "\n"
+        return writeTextAtomic(envFile, text)
+    }
+
+    /** Updates `env.txt` flags in both [pack] and its `nx2a_dev/<tid>/env.txt` (if present) so syncs keep edits. */
+    fun saveEnvToggles(
+        pack: File,
+        titleId: String,
+        updates: Map<String, String?>,
+        devRoot: File = defaultDevRoot(),
+    ): Boolean {
+        val packOk = applyEnvUpdates(File(pack, "env.txt"), updates)
+        val devDir = findGameDevDir(devRoot, titleId)
+        val devEnv = devDir?.let { File(it, "env.txt") }
+        if (devEnv != null && (devEnv.isFile || updates.values.any { it != null })) {
+            applyEnvUpdates(devEnv, updates)
+        }
+        return packOk
     }
 
     fun syncGame(

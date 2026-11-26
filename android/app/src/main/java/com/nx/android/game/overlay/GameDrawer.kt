@@ -123,6 +123,7 @@ enum class DrawerTab(@StringRes val label: Int, val icon: ImageVector) {
     AUDIO(R.string.drawer_tab_audio, Icons.AutoMirrored.Filled.VolumeUp),
     PLAYERS(R.string.drawer_tab_players, Icons.Filled.Groups),
     CHEATS(R.string.drawer_tab_cheats, Icons.Filled.Extension),
+    DEV(R.string.drawer_tab_dev, Icons.Filled.Tune),
 }
 
 /**
@@ -177,6 +178,15 @@ fun GameDrawer(
     onCheatToggle: (Int, Boolean) -> Unit,
     cheatStatus: () -> CheatStatus,
     onCheatsDownload: () -> Unit,
+    devBuildInfo: DevBuildInfo? = null,
+    devGlitchPillShown: () -> Boolean = { false },
+    onDevGlitchPillShown: (Boolean) -> Unit = {},
+    devAutoFlicker: () -> Boolean = { false },
+    onDevAutoFlicker: (Boolean) -> Unit = {},
+    devAutoReplay: () -> Boolean = { false },
+    onDevAutoReplay: (Boolean) -> Unit = {},
+    onDevFlagGlitchNow: () -> Unit = {},
+    onDevRestartWithEnv: (Map<String, String?>) -> Unit = {},
     onPauseGame: () -> Unit,
     onResumeGame: () -> Unit,
     onExit: () -> Unit,
@@ -252,16 +262,21 @@ fun GameDrawer(
                         shape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp),
                     ) {
                         Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 14.dp)) {
-                            var tab by remember { mutableIntStateOf(0) }
+                            val tabs = remember(devBuildInfo) {
+                                if (devBuildInfo != null) DrawerTab.entries
+                                else DrawerTab.entries.filter { it != DrawerTab.DEV }
+                            }
+                            var tab by remember(tabs) { mutableIntStateOf(0) }
+                            val safeTab = tab.coerceIn(0, tabs.lastIndex)
                             // 顶部的页签行：图标在上、文字在下，选中项下面一条滑动的短杠
-                            DrawerTabBar(tab) { tab = it; AppLog.line("drawer: the tab -> ${DrawerTab.entries[it].name}") }
+                            DrawerTabBar(tabs, safeTab) { tab = it; AppLog.line("drawer: the tab -> ${tabs[it].name}") }
                             Spacer(Modifier.height(10.dp))
                             // 内容页：滚动，占据动作行之上的全部空间（动作行在本列底部，不可能被挤出）
                             Column(
                                 Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                when (DrawerTab.entries[tab]) {
+                                when (tabs[safeTab]) {
                                     // 性能页：帧率档位、GPU 提频与底座模式（都是性能取舍，与帧生成无关）
                                     DrawerTab.PERF -> PerfRows(ratePin, onRatePin, rateSupported,
                                         turboSupported, turboMode, { mode -> turboMode = mode; Native.gpuTurboSet(mode) })
@@ -291,6 +306,19 @@ fun GameDrawer(
                                     DrawerTab.CHEATS -> CheatRows(cheatList, cheatsMasterOn, cheatsSupported,
                                         cheatStatus(), { on -> cheatsMasterOn = on; onCheatsMaster(on) },
                                         onCheatToggle, onCheatsDownload)
+                                    DrawerTab.DEV -> devBuildInfo?.let { info ->
+                                        DevRows(
+                                            buildInfo = info,
+                                            glitchPillShown = devGlitchPillShown(),
+                                            onGlitchPillShown = onDevGlitchPillShown,
+                                            autoFlicker = devAutoFlicker(),
+                                            onAutoFlicker = onDevAutoFlicker,
+                                            autoReplayOnDevLaunch = devAutoReplay(),
+                                            onAutoReplayOnDevLaunch = onDevAutoReplay,
+                                            onFlagGlitchNow = onDevFlagGlitchNow,
+                                            onRestartWithEnv = onDevRestartWithEnv,
+                                        )
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
@@ -323,7 +351,7 @@ fun GameDrawer(
  * 页签一行放不下就横着滚——短杠画在滚动内容里，跟着一起滚，不用另外算偏移。
  */
 @Composable
-private fun DrawerTabBar(selected: Int, onSelect: (Int) -> Unit) {
+private fun DrawerTabBar(tabs: List<DrawerTab>, selected: Int, onSelect: (Int) -> Unit) {
     val density = LocalDensity.current
     // 每个瓦片在滚动行里的位置与宽度：短杠照着选中瓦片走
     val bounds = remember { mutableStateMapOf<Int, Rect>() }
@@ -346,7 +374,7 @@ private fun DrawerTabBar(selected: Int, onSelect: (Int) -> Unit) {
     )
     Box(Modifier.horizontalScroll(rememberScrollState())) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            for ((i, t) in DrawerTab.entries.withIndex()) {
+            for ((i, t) in tabs.withIndex()) {
                 DrawerTabTile(t, selected == i, onClick = { onSelect(i) }, onBounds = { bounds[i] = it })
             }
         }

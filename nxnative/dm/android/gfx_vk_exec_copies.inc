@@ -53,9 +53,9 @@ static void copy_b2t(const p_copy_b2t *c, int to_texture) {
         else { if (rows > UINT64_MAX / pitch) { VKRED_ONCE(74, "BC buffer ↔ texture copy extent overflows: skipped"); return; } slice = pitch * rows; }
         if (!copy_span_bytes(tight, pitch, slice, rows, depth, &span) || span > UINT64_MAX - c->src) { VKRED_ONCE(74, "BC buffer ↔ texture copy extent overflows: skipped"); return; }
     }
-    int sparse_src = nvn_sparse_address_pool(c->src, 1) != NULL;
     // A contiguous sparse source takes its physical buffer directly; a non-contiguous (or partially mapped) sparse B->T copy is gathered page-by-page below into scratch.
-    uint64_t lookup = sparse_src ? span : 1;
+    uint64_t lookup = nvn_sparse_address_pool(c->src, 1) ? span : 1;
+    int sparse_src = nvn_sparse_address_pool(c->src, 1) != NULL;
     int have_buf = vk_buf_at(c->src, lookup, &b, &o);
     if (!have_buf && !(to_texture && sparse_src)) {
         VKRED_ONCE(70, "buffer of a buffer ↔ texture copy outside the memory pools"); return;

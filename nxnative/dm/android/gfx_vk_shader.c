@@ -46,6 +46,7 @@ static void bundle_open_once(void) {
 // once, and every caller waits until it is open: the replay and the prewarm threads both look shaders up at start, and a lookup that ran before the bundle
 // was open cached its shader as missing for good (every draw skipped as "no program" in some runs)
 static void bundle_auto(void) { static pthread_once_t once = PTHREAD_ONCE_INIT; pthread_once(&once, bundle_open_once); }
+uint32_t vk_shader_bundle_count(void) { bundle_auto(); return g_nent; }
 int vk_shader_keys(uint32_t stage, uint64_t *out, int max) {   // the bundle's shaders of one stage (gfx_vk_exec.c compute_warm)
     bundle_auto(); int n = 0;
     for (uint32_t i = 0; i < g_nent && n < max; i++) { uint32_t st; memcpy(&st, &g_ent[i].stage, 4); if (st == stage) memcpy(&out[n++], &g_ent[i].key, 8); }

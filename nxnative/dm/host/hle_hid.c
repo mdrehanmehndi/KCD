@@ -257,6 +257,10 @@ void dm_pad_players(uint32_t mask) {
     note_merged();
 }
 
+#ifdef DM_ANDROID
+int qa_input_replay_sample(uint64_t *buttons, int32_t axes[4]) __attribute__((weak));
+#endif
+
 static void fill(NpadState *s, uint32_t id, uint32_t style) {
     memset(s, 0, sizeof *s);
     s->sampling = atomic_fetch_add(&g_sampling, 1) + 1;
@@ -265,10 +269,16 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
     // Player 1: the keyboard / touch path, its controller path and those of the players merged into it; another player: its own controller path
     uint32_t src = pl ? 1u << pl : 1u | merged_players();
     uint64_t b = 0; int32_t a[4] = {0};
-    if (!pl) { b = atomic_load(&g_btn) | atomic_exchange(&g_latch, 0); uint64_t k = atomic_load(&g_axes); for (int i = 0; i < 4; i++) a[i] = ax(k, i); }
-    for (int p = 0; p < DM_PLAYERS; p++) if (src >> p & 1) {
-        b |= atomic_load(&g_pad_btn[p]) | atomic_exchange(&g_pad_latch[p], 0);
-        uint64_t v = atomic_load(&g_pad_axes[p]); for (int i = 0; i < 4; i++) a[i] = pick(a[i], ax(v, i));
+    int replaying = 0;
+#ifdef DM_ANDROID
+    if (!pl && qa_input_replay_sample && qa_input_replay_sample(&b, a)) replaying = 1;
+#endif
+    if (!replaying) {
+        if (!pl) { b = atomic_load(&g_btn) | atomic_exchange(&g_latch, 0); uint64_t k = atomic_load(&g_axes); for (int i = 0; i < 4; i++) a[i] = ax(k, i); }
+        for (int p = 0; p < DM_PLAYERS; p++) if (src >> p & 1) {
+            b |= atomic_load(&g_pad_btn[p]) | atomic_exchange(&g_pad_latch[p], 0);
+            uint64_t v = atomic_load(&g_pad_axes[p]); for (int i = 0; i < 4; i++) a[i] = pick(a[i], ax(v, i));
+        }
     }
     s->lx = a[0]; s->ly = a[1]; s->rx = a[2]; s->ry = a[3];
     b &= 0xffffull;
@@ -304,6 +314,15 @@ uint64_t dm_cheats_keys(void) {
     if (a[2] > STICK_THRESH) b |= 1u << 22;
     if (a[3] < -STICK_THRESH) b |= 1u << 23;
     return b;
+}
+
+void dm_hid_player1_state(uint64_t *out_btn, int32_t axes[4]) {
+    uint64_t b = atomic_load(&g_btn) | atomic_load(&g_pad_btn[0]);
+    int32_t a[4] = {0};
+    uint64_t k = atomic_load(&g_axes); for (int i = 0; i < 4; i++) a[i] = ax(k, i);
+    uint64_t v = atomic_load(&g_pad_axes[0]); for (int i = 0; i < 4; i++) a[i] = pick(a[i], ax(v, i));
+    if (out_btn) *out_btn = b & 0xffffull;
+    if (axes) for (int i = 0; i < 4; i++) axes[i] = a[i];
 }
 
 // GetNpadStates(out, n, id): newest first, n entries: the current state repeated with consecutive sampling numbers. The host keeps no history, but on hardware the

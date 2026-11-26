@@ -15,7 +15,12 @@
 double dm_log_elapsed(void);   // defined in dm/host/main.c
 // One line at a time: LOG is called from guest threads and from the replay/present threads at once, and two stdio calls per line let another
 // thread's text land in the middle of this one. flockfile keeps it whole without formatting into a buffer (a guest thread's stack can be 8 KB)
+#ifdef DM_ANDROID
+void qa_log_record(double t, const char *fmt, ...) __attribute__((weak, format(printf, 2, 3)));
+#define LOG(...) do { double _dmt = dm_log_elapsed(); flockfile(stderr); fprintf(stderr, "[dm] %9.3fs ", _dmt); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); funlockfile(stderr); if (qa_log_record) qa_log_record(_dmt, __VA_ARGS__); } while (0)
+#else
 #define LOG(...) do { flockfile(stderr); fprintf(stderr, "[dm] %9.3fs ", dm_log_elapsed()); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); funlockfile(stderr); } while (0)
+#endif
 #define die(...) do { LOG("FATAL " __VA_ARGS__); abort(); } while (0)
 
 // Object-format differences for inline assembly and registration tables (Android port: ELF instead of Mach-O).

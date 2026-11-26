@@ -8,6 +8,7 @@
 #include "dm.h"
 #include "jni_android.h"
 #include "dm_framegen.h"
+#include "qa_dev.h"
 #include <android/input.h>
 
 int dm_menu_get(int what);   // front_player.c: the menu rows' current values (0 overlay, 1 opacity, 2 rumble, 4 docked)
@@ -458,4 +459,65 @@ JNIEXPORT void JNICALL
 Java_com_nx_android_game_Native_cheatsClose(JNIEnv *E, jclass c) {
     (void)E; (void)c;
     dm_cheats_close();
+}
+
+// ---- Developer QA Overlay (qa_dev.c) ----
+
+JNIEXPORT jboolean JNICALL
+Java_com_nx_android_game_Native_qaSupported(JNIEnv *E, jclass c) {
+    (void)E; (void)c;
+    return qa_dev_enabled() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nx_android_game_Native_qaStatus(JNIEnv *E, jclass c) {
+    (void)c;
+    char buf[768];
+    qa_status_json(buf, sizeof buf);
+    return (*E)->NewStringUTF(E, buf);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_nx_android_game_Native_qaFlagGlitch(JNIEnv *E, jclass c, jstring source) {
+    (void)c;
+    const char *s = source ? (*E)->GetStringUTFChars(E, source, NULL) : NULL;
+    int target = qa_flag_glitch(s ? s : "manual");
+    if (s) (*E)->ReleaseStringUTFChars(E, source, s);
+    return target;
+}
+
+JNIEXPORT void JNICALL
+Java_com_nx_android_game_Native_qaSetAutoFlicker(JNIEnv *E, jclass c, jboolean on) {
+    (void)E; (void)c;
+    qa_set_auto_flicker(on ? 1 : 0);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_nx_android_game_Native_qaStartRecord(JNIEnv *E, jclass c) {
+    (void)E; (void)c;
+    return qa_input_start_record() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_nx_android_game_Native_qaStartReplay(JNIEnv *E, jclass c) {
+    (void)E; (void)c;
+    return qa_input_start_replay() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_nx_android_game_Native_qaStopInput(JNIEnv *E, jclass c) {
+    (void)E; (void)c;
+    qa_input_stop();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_nx_android_game_Native_qaDumpPasses(JNIEnv *E, jclass c) {
+    (void)E; (void)c;
+    return qa_trigger_passdump() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_nx_android_game_Native_qaFlushShaders(JNIEnv *E, jclass c) {
+    (void)E; (void)c;
+    return qa_flush_shaders();
 }

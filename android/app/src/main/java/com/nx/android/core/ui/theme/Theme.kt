@@ -30,35 +30,42 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The palette: the launcher's colors from the desktop (NX2Apple), the same six the ported games' launcher pages
- * wear — near-black ground, deep panels, cream for the main action, one color per status — plus the brand's
- * orange, the one the app's own icon carries.
+ * Dark medieval leather palette centered around #4B3A26 with warm charcoal-brown grounds
+ * and high-contrast ivory typography.
  */
 object NxPalette {
-    val Background = Color(0xFF0E0E0F)
-    val Surface = Color(0xFF1A1A1C)
-    val Cream = Color(0xFFFFF0D6)
-    val Brand = Color(0xFFFF8A00)
+    val Background = Color(0xFF120E0A)
+    val Surface = Color(0xFF1B1510)
+    val SurfaceElevated = Color(0xFF241C15)
+    val Cream = Color(0xFFF3EAD8)
+    val Brand = Color(0xFF4B3A26)
+    val BrandHighlight = Color(0xFF6E563B)
+    val BrandAccent = Color(0xFF8C6F4E)
     val Ready = Color(0xFF40D678)
     val Building = Color(0xFFFFC73D)
-    val Unbuilt = Color(0xFF91949B)
+    val Unbuilt = Color(0xFF9E9284)
     val Danger = Color(0xFFFF6B66)
 }
 
 private val NxColors = darkColorScheme(
-    primary = NxPalette.Cream,
-    onPrimary = Color(0xFF141416),
-    secondary = NxPalette.Cream.copy(alpha = 0.16f),
+    primary = NxPalette.BrandHighlight,
+    onPrimary = NxPalette.Cream,
+    primaryContainer = NxPalette.Brand,
+    onPrimaryContainer = NxPalette.Cream,
+    secondary = NxPalette.BrandAccent.copy(alpha = 0.24f),
     onSecondary = NxPalette.Cream,
+    tertiary = NxPalette.BrandAccent,
+    onTertiary = NxPalette.Cream,
     background = NxPalette.Background,
-    onBackground = Color(0xFFEDEDF0),
+    onBackground = NxPalette.Cream,
     surface = NxPalette.Surface,
-    onSurface = Color(0xFFEDEDF0),
-    surfaceVariant = NxPalette.Surface,
-    onSurfaceVariant = Color(0xFFA9A9B2),
+    onSurface = NxPalette.Cream,
+    surfaceVariant = NxPalette.SurfaceElevated,
+    onSurfaceVariant = Color(0xFFC5B69F),
     error = NxPalette.Danger,
-    onError = Color(0xFF141416),
-    outlineVariant = Color(0x15FFFFFF),
+    onError = Color(0xFF120E0A),
+    outline = NxPalette.BrandHighlight.copy(alpha = 0.7f),
+    outlineVariant = NxPalette.Brand.copy(alpha = 0.55f),
 )
 
 private val NxTypography = Typography(

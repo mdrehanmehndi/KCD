@@ -102,6 +102,8 @@ import com.nx.android.agent.ui.AgentEdgeBadge
 import com.nx.android.appstate.PageFacts
 import com.nx.android.appstate.PageState
 import com.nx.android.appstate.PageStateStore
+import com.nx.android.game.overlay.DevBuildInfo
+import com.nx.android.game.overlay.FloatingGlitchPill
 import com.nx.android.game.overlay.GameDrawer
 import com.nx.android.game.overlay.TextPrompt
 import com.nx.android.input.GamepadScan
@@ -241,6 +243,12 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     // 助手在游戏画面上的入口（右缘的那条把手）：玩家可以在设置里把它收走
     private var agentBadge by mutableStateOf(true)
+
+    // In-game Developer QA overlay state (strictly gated on PrefsStore.DEV_AUTO_SYNC + nx2a_dev/<tid>/)
+    private var devBuildInfo by mutableStateOf<DevBuildInfo?>(null)
+    private var devGlitchPill by mutableStateOf(false)
+    private var devAutoFlicker by mutableStateOf(false)
+    private var devAutoReplay by mutableStateOf(false)
 
     /** 游戏要文字时（宿主的通知 3）：App 用系统输入法问玩家 */
     private data class TextReq(val title: String, val text: String, val max: Int)
@@ -640,10 +648,38 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
         hudFahrenheit = prefs.bool(PrefsStore.HUD_TEMP_F, false)
         // 助手的游戏内入口：默认在画面上，玩家可以在设置里收走
         agentBadge = prefs.bool(PrefsStore.AGENT_BADGE, true)
+        val devDir = if (prefs.bool(PrefsStore.DEV_AUTO_SYNC, true) && !titleId.isNullOrBlank()) {
+            DevSync.findGameDevDir(DevSync.defaultDevRoot(), titleId)
+        } else null
+        val hostFile = File(host)
+        if (devDir != null) {
+            devGlitchPill = prefs.bool(PrefsStore.DEV_GLITCH_PILL, false)
+            devAutoFlicker = prefs.bool(PrefsStore.DEV_AUTO_FLICKER, false)
+            devAutoReplay = prefs.bool(PrefsStore.DEV_AUTO_REPLAY, false)
+            devBuildInfo = DevBuildInfo(
+                titleId = titleId!!,
+                soSizeBytes = hostFile.length(),
+                soMtimeMs = hostFile.lastModified(),
+                packDir = pack,
+                devDir = devDir.absolutePath,
+            )
+        } else {
+            devBuildInfo = null
+            devGlitchPill = false
+            devAutoFlicker = false
+            devAutoReplay = false
+        }
+        val replayLaunch = devDir != null && (intent.getBooleanExtra(DevSync.EXTRA_DEV_REPLAY, false) || devAutoReplay)
+        val devEnv = if (devDir != null) arrayOf(
+            "DM_DEV_QA=1",
+            "DM_DEV_AUTO_FLICKER=${if (devAutoFlicker) "1" else "0"}",
+            "DM_DEV_REPLAY=${if (replayLaunch) "1" else "0"}",
+        ) else arrayOf("DM_DEV_QA=0")
         // 体感的两行也交给宿主：开不开（默认按设备有没有陀螺仪）与保留甩动方向（每个游戏各一份）
         val env = (fgSettings?.load()?.envLines(LosslessDll.ensure(this)?.absolutePath) ?: emptyArray()) +
             (motionSettings?.load(hasGyroscope(this))?.envLines() ?: emptyArray()) +
-            (cheatSettings?.envLine(cheatsDir()) ?: emptyArray())
+            (cheatSettings?.envLine(cheatsDir()) ?: emptyArray()) +
+            devEnv
         if (!Native.start(pack, filesDir.path, titleId, resources.displayMetrics.densityDpi, env, this)) {
             endProcess()   // the save import asked to end: it happens at the next start
             return
@@ -1022,6 +1058,10 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
                     modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
+            FloatingGlitchPill(
+                visible = devBuildInfo != null && devGlitchPill && !drawerOpen && !editorOpen && !paused,
+                modifier = Modifier.align(Alignment.TopEnd),
+            )
             GameDrawer(
                 paused = paused,
                 open = drawerOpen,
@@ -1067,6 +1107,45 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
                 // 金手指文件：社区库下载的（那一行）或玩家导入的；这一页只显示状态
                 cheatStatus = { cheatStatus },
                 onCheatsDownload = { downloadCheats() },
+                devBuildInfo = devBuildInfo,
+                devGlitchPillShown = { devGlitchPill },
+                onDevGlitchPillShown = { on ->
+                    devGlitchPill = on
+                    PrefsStore(this@GameActivity).put(PrefsStore.DEV_GLITCH_PILL, on)
+                },
+                devAutoFlicker = { devAutoFlicker },
+                onDevAutoFlicker = { on ->
+                    devAutoFlicker = on
+                    PrefsStore(this@GameActivity).put(PrefsStore.DEV_AUTO_FLICKER, on)
+                },
+                devAutoReplay = { devAutoReplay },
+                onDevAutoReplay = { on ->
+                    devAutoReplay = on
+                    PrefsStore(this@GameActivity).put(PrefsStore.DEV_AUTO_REPLAY, on)
+                },
+                onDevFlagGlitchNow = {
+                    drawerOpen = false
+                    lifecycleScope.launch {
+                        delay(65)
+                        runCatching { Native.qaFlagGlitch("manual") }
+                    }
+                },
+                onDevRestartWithEnv = { updates ->
+                    val pack = packPath?.let(::File)
+                    val tid = packTitleId.orEmpty()
+                    if (pack != null && tid.isNotEmpty()) {
+                        DevSync.saveEnvToggles(pack, tid, updates)
+                        val i = Intent(this@GameActivity, com.nx.android.MainActivity::class.java)
+                            .setAction(DevSync.ACTION_LAUNCH)
+                            .putExtra(DevSync.EXTRA_TITLE_ID, tid)
+                            .putExtra(DevSync.EXTRA_SYNC, false)
+                            .putExtra(DevSync.EXTRA_DEV_REPLAY, devAutoReplay)
+                            .putExtra("wait_exit_ms", 1500L)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        startActivity(i)
+                        endProcess()
+                    }
+                },
                 // 暂停/继续：游戏原地停/起，抽屉不收——玩家可以一边停着一边调设置
                 onPauseGame = {
                     paused = true

@@ -861,11 +861,14 @@
     <string name="agent_panel_expand">打开完整对话</string>
     <string name="set_dev_section">开发者 / Termux</string>
     <string name="set_dev_sync_title">开发自动同步与直启</string>
-    <string name="set_dev_sync_note">当 %1$s/&lt;title_id&gt;/ 存在时，启动前自动同步 libdmplay.so、shaders.dmsv、env.txt、nx2a-data.json 与 user.cfg，将日志与 captured_shaders 镜像到 out/，并启用 Termux am start / nx2a://launch 直启。</string>
+    <string name="set_dev_sync_note">当 %1$s/&lt;title_id&gt;/ 存在时，启动前自动同步 libdmplay.so、shaders.dmsv、env.txt、nx2a-data.json 与 user.cfg，将日志与 captured_shaders 镜像到 out/，并启用 Termux am start / kcdplay://launch 直启。</string>
     <string name="set_dev_sync_launch_title">立即同步并启动游戏</string>
     <string name="set_dev_sync_launch_label">同步并启动</string>
     <string name="set_dev_sync_launch_note">从 nx2a_dev 拉取覆盖文件、导出 out/ 日志并启动暂存游戏。</string>
     <string name="dev_sync_disabled_toast">请先在「设置 → 关于」中开启「开发自动同步与直启」</string>
     <string name="dev_launch_no_target">未找到可启动的已移植游戏</string>
     <string name="dev_sync_done_toast">开发同步完成：拉取 %1$d 项，导出 %2$d 项</string>
+    <string name="drawer_tab_dev">开发</string>
+    <string name="dev_pill_label">异常抓帧</string>
+    <string name="dev_pill_saved">已保存 frame_%1$s</string>
 </resources>

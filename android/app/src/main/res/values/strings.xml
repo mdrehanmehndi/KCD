@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">nx2androidX</string>
+    <string name="app_name" translatable="false">KCD Play</string>
     <string name="app_tab_library">Library</string>
     <string name="app_tab_builds">Builds</string>
     <string name="app_tab_settings">Settings</string>
@@ -862,11 +862,14 @@
     <string name="agent_panel_expand">Open the full chat</string>
     <string name="set_dev_section">Developer / Termux</string>
     <string name="set_dev_sync_title">Dev Auto-Sync + Direct Launch</string>
-    <string name="set_dev_sync_note">Auto-syncs libdmplay.so, shaders.dmsv, env.txt, nx2a-data.json, and user.cfg from %1$s/&lt;title_id&gt;/ before launch, exports logs &amp; captured_shaders to out/, and enables Termux am start / nx2a://launch direct launch.</string>
+    <string name="set_dev_sync_note">Auto-syncs libdmplay.so, shaders.dmsv, env.txt, nx2a-data.json, and user.cfg from %1$s/&lt;title_id&gt;/ before launch, exports logs &amp; captured_shaders to out/, and enables Termux am start / kcdplay://launch direct launch.</string>
     <string name="set_dev_sync_launch_title">Sync staged files &amp; launch</string>
     <string name="set_dev_sync_launch_label">Sync &amp; Launch</string>
     <string name="set_dev_sync_launch_note">Pulls overrides from nx2a_dev, mirrors out/ logs, and starts the staged game.</string>
     <string name="dev_sync_disabled_toast">Enable Dev Auto-Sync + Direct Launch in Settings (About) first</string>
     <string name="dev_launch_no_target">No matching ported game found to launch</string>
     <string name="dev_sync_done_toast">Dev sync done: %1$d pulled, %2$d exported</string>
+    <string name="drawer_tab_dev">Dev</string>
+    <string name="dev_pill_label">Glitch</string>
+    <string name="dev_pill_saved">Saved frame_%1$s</string>
 </resources>

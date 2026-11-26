@@ -805,6 +805,7 @@ static void host_start_common(JNIEnv *E, JavaVM *vm, jobject actctx, const char 
     snprintf(p, sizeof p, "%s/temp", internal); mkdir(p, 0700); snprintf(q, sizeof q, "%s%s", p, sub); mkdir(q, 0700); setenv("DM_TEMP", q, 0);
     snprintf(p, sizeof p, "%s/shaders.dmsv", g_root); setenv("DM_VK_SHADERS", p, 0);
     snprintf(p, sizeof p, "%s/env.txt", g_root); env_file(p);
+    { void qa_dev_init(const char *pack_dir, const char *title_id); qa_dev_init(g_root, gid); }
     // the save manager's requests (saves_android.c), before the host mounts the save: an import the player asked for in the drawer, an export porter asks for
     if (dm_saves_start(g_root)) { LOG("[saves] the request asked the app to end: the game is not started"); return; }
     settings_load(); dm_haptics_android_start(E, vm, actctx, atomic_load(&g_set_rumble));

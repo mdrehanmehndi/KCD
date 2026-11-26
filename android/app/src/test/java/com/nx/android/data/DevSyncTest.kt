@@ -191,4 +191,46 @@ class DevSyncTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun `applicationId launch wiring and saveEnvToggles update both pack and dev env`() {
+        assertEquals("com.rehan.kcdplay", com.nx.android.BuildConfig.APPLICATION_ID)
+        assertEquals("com.rehan.kcdplay.ACTION_DEV_LAUNCH", DevSync.ACTION_LAUNCH)
+        assertEquals("kcdplay", DevSync.SCHEME_LAUNCH)
+        assertEquals("dev_replay", DevSync.EXTRA_DEV_REPLAY)
+
+        val root = Files.createTempDirectory("dev-env-toggle-test").toFile()
+        try {
+            val tidLower = "010021601c496000"
+            val pack = File(root, "ports/KCD").apply { mkdirs() }
+            val devRoot = File(root, "nx2a_dev")
+            val devDir = File(devRoot, tidLower).apply { mkdirs() }
+            File(pack, "env.txt").writeText("# keep\nDM_ROMFS=/data/romfs\nDM_VK_CB_DRAWS=1\n")
+            File(devDir, "env.txt").writeText("DM_LANG=en-US\nDM_VK_CB_DRAWS=1\n")
+
+            DevSync.saveEnvToggles(
+                pack = pack,
+                titleId = "010021601C496000",
+                updates = mapOf(
+                    "DM_VK_NAN_SANITIZE" to "1",
+                    "DM_VK_CB_DRAWS" to null,
+                    "DM_VK_SUBGROUP_PIN" to "64",
+                ),
+                devRoot = devRoot,
+            )
+
+            val packMap = DevSync.readEnvFlags(File(pack, "env.txt"))
+            val devMap = DevSync.readEnvFlags(File(devDir, "env.txt"))
+            assertEquals("/data/romfs", packMap["DM_ROMFS"])
+            assertEquals("1", packMap["DM_VK_NAN_SANITIZE"])
+            assertEquals("64", packMap["DM_VK_SUBGROUP_PIN"])
+            assertFalse(packMap.containsKey("DM_VK_CB_DRAWS"))
+            assertEquals("en-US", devMap["DM_LANG"])
+            assertEquals("1", devMap["DM_VK_NAN_SANITIZE"])
+            assertEquals("64", devMap["DM_VK_SUBGROUP_PIN"])
+            assertFalse(devMap.containsKey("DM_VK_CB_DRAWS"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

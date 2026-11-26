@@ -71,6 +71,10 @@ class PrefsStore @Inject constructor(@ApplicationContext ctx: Context) {
         const val AGENT_BADGE = "agent.badge"
         // developer fast-iteration auto-sync + direct launch when nx2a_dev/<title_id>/ exists (on by default; inert without that folder)
         const val DEV_AUTO_SYNC = "dev.autoSync"
+        // in-game Dev drawer switches (gated on DEV_AUTO_SYNC + nx2a_dev/<tid>/)
+        const val DEV_GLITCH_PILL = "dev.glitchPill"
+        const val DEV_AUTO_FLICKER = "dev.autoFlicker"
+        const val DEV_AUTO_REPLAY = "dev.autoReplay"
     }
 
     val prefs: SharedPreferences = ctx.getSharedPreferences(NAME, Context.MODE_PRIVATE)

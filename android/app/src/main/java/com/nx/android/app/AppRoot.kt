@@ -904,23 +904,6 @@ private fun TopBar(
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 14.dp),
     ) {
-        Image(painterResource(R.drawable.ic_launcher_mark), null, Modifier.size(32.dp))
-        // 品牌：名字只有 app_name 一处，末位的标记（X）单独用品牌色
-        val brand = stringResource(R.string.app_name)
-        Text(
-            buildAnnotatedString {
-                withStyle(SpanStyle(color = MaterialTheme.colorScheme.onBackground)) {
-                    append(
-                        brand.dropLast(
-                            1
-                        )
-                    )
-                }
-                withStyle(SpanStyle(color = NxPalette.Brand)) { append(brand.takeLast(1)) }
-            },
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(start = 8.dp, end = 30.dp),
-        )
         Tab.entries.forEachIndexed { i, t ->
             Text(
                 stringResource(t.label),
