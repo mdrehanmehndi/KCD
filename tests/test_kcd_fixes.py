@@ -308,5 +308,62 @@ int main(void) {
             self.assertEqual(run.returncode, 0, run.stderr)
 
 
+class AppCaptureRebuildTest(unittest.TestCase):
+    def test_pull_captures_in_app_mode_imports_and_preserves_captured_shaders(self):
+        import importlib.util
+        if importlib.util.find_spec('lz4') is None:
+            self.skipTest('lz4 required for porter.pipeline')
+        if str(REPO) not in sys.path:
+            sys.path.insert(0, str(REPO))
+        from types import SimpleNamespace
+        from porter import datapack
+        from porter.pipeline import Port
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            port = Port.__new__(Port)
+            port.o = SimpleNamespace(app=True, install=False, device=None, out=None)
+            port.cfg = {}
+            port.package = 'com.nx.p010021601c496000'
+            port.aw = root / 'work/010021601C496000_build/android'
+            port.work_root = root / 'work'
+            port.g = game.load('010021601C496000')
+            port.app_name = 'Kingdom Come: Deliverance - Royal Edition'
+
+            data_dir = port.data_dir()
+            cap_src = data_dir / 'captured_shaders'
+            cap_src.mkdir(parents=True)
+            good = cap_src / '0123456789abcdef.bin'
+            good.write_bytes(b'DMSC' + b'\x00' * 16)
+            (cap_src / 'bad_name.bin').write_bytes(b'DMSC')
+            (cap_src / 'fedcba9876543210.bin').write_bytes(b'')   # empty file ignored
+
+            port.pull_captures()
+            pulled = port.aw / 'captured_shaders' / '0123456789abcdef.bin'
+            self.assertTrue(pulled.is_file())
+            self.assertEqual(pulled.read_bytes(), good.read_bytes())
+            self.assertFalse((port.aw / 'captured_shaders' / 'bad_name.bin').exists())
+            self.assertFalse((port.aw / 'captured_shaders' / 'fedcba9876543210.bin').exists())
+
+            # Full datapack.build() rebuilds data_dir() while preserving captured_shaders/
+            ap = android_profile.load('010021601C496000')
+            patched = root / 'patched'
+            patched.mkdir()
+            (patched / 'main.nso').write_bytes(b'NSO0')
+            shaders = root / 'shaders.dmsv'
+            shaders.write_bytes(b'DMSV')
+            datapack.build(
+                data_dir,
+                profile=ap,
+                version='v0',
+                display='1.0',
+                patched=patched,
+                romfs=None,
+                shaders=shaders,
+                pack_base=str(data_dir),
+            )
+            self.assertTrue((data_dir / 'captured_shaders' / '0123456789abcdef.bin').is_file())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -319,27 +319,40 @@ static void cbuf_desc(int st, const vkshader_t *s, const dmsv_bind *b, VkDescrip
     // it (has_inner) is never answered from here: its range holds the inner pool's addresses, whose pages its buffer no longer has (Fire Emblem: Three Houses' device lost, 7a6eba18)
     static struct { uint32_t gen; vkpool_t *p[4]; } pc[6][16];
     vkpool_t *p = NULL;
-    if (g_var_now != 9 && u && u->addr) {
+    uint64_t ua = u ? u->addr : 0;
+    if (g_var_now != 9 && ua) {
         uint32_t vk_pool_gen(void); uint32_t g = vk_pool_gen() + 1; typeof(pc[0][0]) *e = &pc[st][b->reg];
-        if (e->gen == g) for (int k = 0; k < 4; k++) { vkpool_t *c = e->p[k]; if (c && u->addr >= c->lo && u->addr < c->hi && !__atomic_load_n(&c->has_inner, __ATOMIC_ACQUIRE)) { p = c; for (; k > 0; k--) e->p[k] = e->p[k - 1]; e->p[0] = c; break; } }
-        if (!p) { p = vk_pool_of(u->addr, 1); if (e->gen != g) { memset(e->p, 0, sizeof e->p); e->gen = g; } if (p) { memmove(&e->p[1], &e->p[0], 3 * sizeof *e->p); e->p[0] = p; } }
+        if (e->gen == g) for (int k = 0; k < 4; k++) { vkpool_t *c = e->p[k]; if (c && ua >= c->lo && ua < c->hi && !__atomic_load_n(&c->has_inner, __ATOMIC_ACQUIRE)) { p = c; for (; k > 0; k--) e->p[k] = e->p[k - 1]; e->p[0] = c; break; } }
+        if (!p) {
+            p = vk_pool_of(ua, 1);
+            if (!p && nvn_sparse_address_pool(ua, 1)) {
+                uint64_t pa = 0;
+                if (nvn_sparse_address_translate(ua, n, &pa)) { ua = pa; p = vk_pool_of(ua, 1); }
+                else if (vk_sparse_buf_snapshot(ua, n, V.props.limits.minUniformBufferOffsetAlignment, &buf, &off)) {
+                    ubo_log(s, st, b->reg, ua, n); *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[1]++; return;
+                }
+            } else {
+                if (e->gen != g) { memset(e->p, 0, sizeof e->p); e->gen = g; }
+                if (p) { memmove(&e->p[1], &e->p[0], 3 * sizeof *e->p); e->p[0] = p; }
+            }
+        }
     }
     if (!p) {
-        if (g_ubolog_key && s->key == g_ubolog_key && g_ubolog_n > 0) { g_ubolog_n--; VKLOG("ubo: present %llu pass %d stage %d c%d %#llx +%llu: in no memory pool, zeros bound", (unsigned long long)g_tex_frame, g_sub_pass - 1, st, b->reg, (unsigned long long)(u ? u->addr : 0), (unsigned long long)(u ? u->size : 0)); }
+        if (g_ubolog_key && s->key == g_ubolog_key && g_ubolog_n > 0) { g_ubolog_n--; VKLOG("ubo: present %llu pass %d stage %d c%d %#llx +%llu: in no memory pool, zeros bound", (unsigned long long)g_tex_frame, g_sub_pass - 1, st, b->reg, (unsigned long long)ua, (unsigned long long)(u ? u->size : 0)); }
         *bi = (VkDescriptorBufferInfo){vk_zero_buffer(), 0, 65536}; return; }
-    buf = p->buf; off = u->addr - p->lo;
+    buf = p->buf; off = ua - p->lo;
     if (off + n > p->hi - p->lo) {
-        if (p->hi < p->end && u->addr + n <= p->end) {   // into the pool's next chunk (vk_cross): the whole range from CPU memory, one copy per submission
-            static struct { uint64_t a, n, ep, gen; VkBuffer b; VkDeviceSize o; } cc[16]; unsigned k = (unsigned)(u->addr >> 8) % 16;
-            if (cc[k].a != u->addr || cc[k].n != n || cc[k].ep != g_set_epoch || cc[k].gen != g_ubd_gen) {
-                uint8_t *d = vk_scratch(n, V.props.limits.minUniformBufferOffsetAlignment, &buf, &off); vk_ubd_read(u->addr, n, d); vk_cross(0, u->addr, n, p);
-                cc[k].a = u->addr; cc[k].n = n; cc[k].ep = g_set_epoch; cc[k].gen = g_ubd_gen; cc[k].b = buf; cc[k].o = off;
+        if (p->hi < p->end && ua + n <= p->end) {   // into the pool's next chunk (vk_cross): the whole range from CPU memory, one copy per submission
+            static struct { uint64_t a, n, ep, gen; VkBuffer b; VkDeviceSize o; } cc[16]; unsigned k = (unsigned)(ua >> 8) % 16;
+            if (cc[k].a != ua || cc[k].n != n || cc[k].ep != g_set_epoch || cc[k].gen != g_ubd_gen) {
+                uint8_t *d = vk_scratch(n, V.props.limits.minUniformBufferOffsetAlignment, &buf, &off); vk_ubd_read(ua, n, d); vk_cross(0, ua, n, p);
+                cc[k].a = ua; cc[k].n = n; cc[k].ep = g_set_epoch; cc[k].gen = g_ubd_gen; cc[k].b = buf; cc[k].o = off;
             } else { buf = cc[k].b; off = cc[k].o; }
-            ubo_log(s, st, b->reg, u->addr, n); *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[1]++; return;
+            ubo_log(s, st, b->reg, ua, n); *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[1]++; return;
         }
         n = p->hi - p->lo - off;
     }
-    ubo_log(s, st, b->reg, u->addr, n);
+    ubo_log(s, st, b->reg, ua, n);
     if (vk_ubd_shadow(u->addr, n, &buf, &off)) { *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[2]++; return; }   // deferred updates in it: their shadow
     g_cbpath[0]++;
     VkDeviceSize am = V.props.limits.minUniformBufferOffsetAlignment - 1, mis = off & am;   // (a power of two: a mask, not a division)
@@ -549,8 +562,8 @@ static VkDescriptorSet stage_set(int st, vkshader_t *s, uint32_t *dofs, VkDescri
             if (b->kind == RK_SBUF && b->reg >= 0 && b->reg < 16) { a = S.ssbo[st][b->reg].addr; n = S.ssbo[st][b->reg].size; }
             else if (b->kind == RK_UBO_PTR && b->reg >= 0 && b->reg < 16) { a = S.ubo[st][b->reg].addr; n = S.ubo[st][b->reg].size; }
             else if (b->kind == RK_SBUF_UBO) { a = (uint64_t)ubo_word(st, b->reg, b->off) | (uint64_t)ubo_word(st, b->reg, b->off + 4) << 32; }
-            uint64_t guest_a = a, physical = 0; vkpool_t *p = a ? vk_pool_of(a, 1) : NULL;
-            if (!p && a && n && nvn_sparse_address_translate(a, n, &physical)) { p = vk_pool_of(physical, n); if (p) a = physical; }
+            uint64_t guest_a = a, physical = 0, tlen = n ? n : 1; vkpool_t *p = a ? vk_pool_of(a, 1) : NULL;
+            if (!p && a && nvn_sparse_address_translate(a, tlen, &physical)) { p = vk_pool_of(physical, tlen); if (p) a = physical; }
             if (p) { buf = p->buf; off = a - p->lo; if (n && off + n > p->hi - p->lo && p->hi < p->end) vk_cross(1, a, n, p); if (!n || off + n > p->hi - p->lo) n = p->hi - p->lo - off;
                 // bound from the 256-byte boundary below it, the boundary the translator offsets every access from (shader_vk.py SB_ALIGN; a multiple of any device's minimum alignment)
                 const VkDeviceSize al = SB_ALIGN; if (V.props.limits.minStorageBufferOffsetAlignment > al) VKRED_ONCE(41, "storage buffer alignment %llu above %llu", (unsigned long long)V.props.limits.minStorageBufferOffsetAlignment, (unsigned long long)al);

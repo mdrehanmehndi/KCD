@@ -1826,6 +1826,22 @@ int vk_ubd_shadow(uint64_t a, uint64_t n, VkBuffer *buf, VkDeviceSize *off) {
     c[k].a = a; c[k].n = n; c[k].gen = g_ubd_gen; c[k].b = *buf; c[k].o = *off; g_ubd_shadows++;
     return 1;
 }
+int vk_sparse_buf_snapshot(uint64_t addr, uint64_t len, VkDeviceSize align, VkBuffer *buf, VkDeviceSize *off) {
+    if (!addr || !len || len > 32u * 1024u * 1024u || len > UINT64_MAX - addr || !nvn_sparse_address_pool(addr, 1)) return 0;
+    if (align < 16) align = 16;
+    enum { SC = 32 };
+    static struct { uint64_t a, n, f, sgen, ubd; VkDeviceSize al; VkBuffer b; VkDeviceSize o; } cache[SC];
+    uint64_t sub = g_fence + 1, sg = nvn_sparse_gen();
+    unsigned k = (unsigned)((addr >> 8) ^ (len >> 4)) % SC;
+    if (cache[k].a == addr && cache[k].n == len && cache[k].al == align && cache[k].f == sub && cache[k].sgen == sg && cache[k].ubd == g_ubd_gen) {
+        *buf = cache[k].b; *off = cache[k].o; return 1;
+    }
+    uint8_t *dst = vk_scratch(len, align, buf, off);
+    if (!dst) return 0;
+    vk_ubd_read(addr, len, dst);
+    cache[k] = (typeof(cache[0])){addr, len, sub, sg, g_ubd_gen, align, *buf, *off};
+    return 1;
+}
 void mtl_sub_index(const uint64_t *h, int n) { (void)h; (void)n; }
 void mtl_exec_rest(const uint64_t *h, int n) { (void)h; (void)n; }
 

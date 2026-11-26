@@ -142,11 +142,15 @@ def build(dst, *, profile, version, display, patched, romfs, shaders, aoc=None, 
     man['player_api_revision'] = PLAYER_API_REVISION   # the runtime interface the pack was built against: the app rebuilds the runtime when its own revision differs
     if parts := {p: k for p in SEEDABLE if (k := part_key(tmp, p))}: man['parts'] = parts   # the content keys install's seeding compares
     (tmp / MANIFEST).write_text(json.dumps(man, indent=2), encoding='utf-8')
-    # the exported saves (the player's backups) are not the build's own: the pack is rebuilt whole, so they are put aside and put back
+    # the exported saves (the player's backups) and runtime-captured shaders are not the build's own: preserve them across the full pack rebuild
     keep = dst.with_name(dst.name + '.saves-keep')
+    keep_cap = dst.with_name(dst.name + '.captures-keep')
     shutil.rmtree(keep, ignore_errors=True)
+    shutil.rmtree(keep_cap, ignore_errors=True)
     exported = dst / 'saves'
+    captured = dst / 'captured_shaders'
     if exported.is_dir(): shutil.move(str(exported), str(keep))
+    if captured.is_dir(): shutil.move(str(captured), str(keep_cap))
     shutil.rmtree(dst, ignore_errors=True)   # the pack of the last port: it may be gone already (the player deleted it), and the files it holds are the build's own (hard links)
     for i in range(20):   # Windows: a folder just removed can stay delete-pending while another process (an indexer, a virus scan) holds it, and the rename is refused meanwhile
         try: tmp.rename(dst); break
@@ -155,7 +159,10 @@ def build(dst, *, profile, version, display, patched, romfs, shaders, aoc=None, 
             time.sleep(0.5)
     if keep.is_dir():
         shutil.move(str(keep), str(dst / 'saves'))   # the backups are back where the save manager looks for them
+    if keep_cap.is_dir():
+        shutil.move(str(keep_cap), str(dst / 'captured_shaders'))
     shutil.rmtree(keep, ignore_errors=True)
+    shutil.rmtree(keep_cap, ignore_errors=True)
     return man
 
 

@@ -461,7 +461,7 @@ class Port:
             self.check_graphics()
             self.fps_unlock()
             self.rewrite()
-            if o.install: self.pull_captures()
+            if o.install or o.app: self.pull_captures()
             self.shaders()
             self.host()
             self.apk()
@@ -1247,11 +1247,29 @@ class Port:
     def pull_captures(self):
         """Shaders whose code no game file holds: the app saves each one the bundle lacks on the device (gfx_vk_shader.c vk_shader_missing), and they are
         pulled here into <build folder>/android/captured_shaders, kept from port to port, for shader_vk.py to translate into the bundle (Xenoblade Chronicles 3: effect and model shaders).
-        Only for an install, which has the device; a device that cannot be reached leaves the captures already pulled"""
+        In --app mode, import directly from the on-device data pack's captured_shaders/ before rebuild replaces it; otherwise pull over adb."""
+        dst = self.aw / 'captured_shaders'
+        pat = re.compile(r'[0-9a-f]{16}\.bin')
+        if self.o.app:
+            src_dir = self.data_dir() / 'captured_shaders'
+            if not src_dir.is_dir(): return
+            dst.mkdir(parents=True, exist_ok=True)
+            got = []
+            for src in sorted(src_dir.iterdir()):
+                if not src.is_file() or not pat.fullmatch(src.name) or src.stat().st_size == 0: continue
+                out = dst / src.name
+                if out.is_file() and out.stat().st_size == src.stat().st_size and out.read_bytes() == src.read_bytes():
+                    continue
+                tmp = dst / (src.name + '.part')
+                shutil.copyfile(src, tmp)
+                tmp.replace(out)
+                got.append(src.name)
+            if got: say(f'{len(got)} shader(s) missing from the bundle, captured on the device: {" ".join(n[:16] for n in got)}')
+            return
         adb = Adb(self.tools['adb'], self.o.device or self.cfg.get('device'), log=say)
         try:
             adb.pick()
-            got = adb.pull_new(f'{datapack.files_folder(self.package)}/captured_shaders', self.aw / 'captured_shaders', pattern=lambda n: re.fullmatch(r'[0-9a-f]{16}\.bin', n))
+            got = adb.pull_new(f'{datapack.files_folder(self.package)}/captured_shaders', dst, pattern=lambda n: pat.fullmatch(n))
         except AdbError as e: say(f'shaders captured on the device not pulled ({e})'); return
         if got: say(f'{len(got)} shader(s) missing from the bundle, captured on the device: {" ".join(n[:16] for n in got)}')
 

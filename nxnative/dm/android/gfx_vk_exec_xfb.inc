@@ -398,7 +398,7 @@ static void draw_idx(const p_draw_idx *d) {
     VkIndexType it = d->itype == 0 ? VK_INDEX_TYPE_UINT8_EXT : d->itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
     VkBuffer ib; VkDeviceSize io;
     if (d->ind && nvn_sparse_address_pool(d->ibuf, 1)) { VKRED_ONCE(98, "indexed indirect draw with a sparse index buffer has no bounded index extent: skipped"); return; }
-    if (!vk_buf_at(d->ibuf, index_lookup, &ib, &io)) { VKRED_ONCE(56, "index buffer outside the memory pools"); return; }
+    if (!vk_buf_at(d->ibuf, index_lookup, &ib, &io) && (d->ind || !vk_sparse_buf_snapshot(d->ibuf, index_lookup, 16, &ib, &io))) { VKRED_ONCE(56, "index buffer outside the memory pools"); return; }
     if (!d->ind) { vkpool_t *ip = vk_pool_of(d->ibuf, 1); if (ip && d->ibuf + index_bytes > ip->hi && ip->hi < ip->end) vk_cross(3, d->ibuf, index_bytes, ip); }
     if (g_ubolog_key && S.sh[0] && S.sh[0]->key == g_ubolog_key && g_ubolog_n > 0) {   // DM_VK_UBO_LOG: the index data the draw reads (CPU view at replay)
         uint64_t h = 1469598103934665603ull; uint32_t mn = ~0u, mx = 0;

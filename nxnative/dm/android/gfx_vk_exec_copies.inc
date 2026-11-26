@@ -53,10 +53,14 @@ static void copy_b2t(const p_copy_b2t *c, int to_texture) {
         else { if (rows > UINT64_MAX / pitch) { VKRED_ONCE(74, "BC buffer ↔ texture copy extent overflows: skipped"); return; } slice = pitch * rows; }
         if (!copy_span_bytes(tight, pitch, slice, rows, depth, &span) || span > UINT64_MAX - c->src) { VKRED_ONCE(74, "BC buffer ↔ texture copy extent overflows: skipped"); return; }
     }
-    // The lookup extent: a sparse source must map contiguously, so it is checked (and translated) over its whole span; a regular pool keeps main's
-    // 1-byte lookup, so a copy whose span runs past the pool is logged by the block below and still made, as main decides
-    uint64_t lookup = nvn_sparse_address_pool(c->src, 1) ? span : 1;
-    if (!vk_buf_at(c->src, lookup, &b, &o)) { VKRED_ONCE(70, "buffer of a buffer ↔ texture copy outside the memory pools"); return; }
+    int sparse_src = nvn_sparse_address_pool(c->src, 1) != NULL;
+    // A contiguous sparse source takes its physical buffer directly; a non-contiguous (or partially mapped) sparse B->T copy is gathered page-by-page below into scratch.
+    uint64_t lookup = sparse_src ? span : 1;
+    int have_buf = vk_buf_at(c->src, lookup, &b, &o);
+    if (!have_buf && !(to_texture && sparse_src)) {
+        VKRED_ONCE(70, "buffer of a buffer ↔ texture copy outside the memory pools"); return;
+    }
+    if (to_texture && sparse_src && decode) have_buf = 1;
     {   // a transfer past the image's level or past the buffer is not covered by any robustness feature: Adreno loses the device (checked before the copy and logged; the copy is still made)
         uint32_t lv = r.imageSubresource.mipLevel, lw = im->w >> lv ? im->w >> lv : 1, lh = im->h >> lv ? im->h >> lv : 1, ld = im->d > 1 ? (im->d >> lv ? im->d >> lv : 1) : 1;
         lw = (lw + bw - 1) / bw * bw; lh = (lh + bh - 1) / bh * bh;
@@ -70,10 +74,12 @@ static void copy_b2t(const p_copy_b2t *c, int to_texture) {
             need = (nz ? nz - 1 : 0) * slice + (by ? by - 1 : 0) * row + bx * f->bpb;
             VkBuffer b2; VkDeviceSize o2; bad_buf = need && !vk_buf_at(c->src, need, &b2, &o2);
         }
-        if (to_texture && bad_buf && !f->dec && need > 0 && nvn_sparse_address_pool(c->src, 1)) {
-            VkBuffer sb; VkDeviceSize so; uint8_t *dst = vk_scratch(need, 16, &sb, &so);
-            if (dst) { nvn_sparse_address_copy(c->src, dst, need); b = sb; r.bufferOffset = so; bad_buf = 0; }
+        uint64_t gather = need ? need : span;
+        if (to_texture && (!have_buf || bad_buf) && !f->dec && gather > 0 && sparse_src) {
+            VkBuffer sb; VkDeviceSize so; uint8_t *dst = vk_scratch(gather, 16, &sb, &so);
+            if (dst) { nvn_sparse_address_copy(c->src, dst, gather); b = sb; o = so; r.bufferOffset = so; have_buf = 1; bad_buf = 0; }
         }
+        if (!have_buf) { VKRED_ONCE(70, "buffer of a buffer ↔ texture copy outside the memory pools"); return; }
         if (bad_img || bad_buf) {
             static unsigned nbad; if (nbad++ < 16) VKLOG("[RED] buffer %s texture copy runs %s (logged, still made: no game seen doing it yet); region %d,%d,%d %ux%ux%u level %u layers %u+%u, image %ux%ux%u layers %u levels %u (nvn format %#x), buffer %#llx +%llu bytes",
                 to_texture ? "→" : "←", bad_img ? "past the image" : "past the memory pool", r.imageOffset.x, r.imageOffset.y, r.imageOffset.z, r.imageExtent.width, r.imageExtent.height, r.imageExtent.depth, lv,
