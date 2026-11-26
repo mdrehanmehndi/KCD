@@ -122,7 +122,7 @@ android {
         targetSdk = 28
         // The version the release's tag carries, without the "v": v0.3.0-alpha02 -> 0.3.0-alpha02. The update
         // check compares the two, so the app can tell which release is newer than the one running.
-        versionCode = 22
+        versionCode = 23
         versionName = "0.4.1-alpha02"
         ndk { abiFilters += listOf("arm64-v8a") }
         // -PnxLsfg=false: the host the app builds is built without the frame generation (the lsfg/ folder): the host

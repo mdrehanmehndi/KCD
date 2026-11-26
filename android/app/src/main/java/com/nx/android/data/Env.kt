@@ -160,15 +160,23 @@ class Env @Inject constructor(@ApplicationContext private val ctx: Context, priv
         ""
     }
 
-    /** The stamp the environment on this phone was built with. */
+    /** The stamp the environment on this phone was built with (both root and tool trees must match). */
     private fun storedPayloadStamp(): String {
-        val mark = File(files, PAYLOAD_STAMP_FILE)
-        return if (mark.isFile) mark.readText().trim() else ""
+        val filesMark = File(files, PAYLOAD_STAMP_FILE)
+        val toolMark = File(tool, PAYLOAD_STAMP_FILE)
+        if (!filesMark.isFile || !toolMark.isFile) return ""
+        if (!File(tool, "nxnative/dm/gfx/tools/shader_split.py").isFile) return ""
+        val filesStamp = filesMark.readText().trim()
+        val toolStamp = toolMark.readText().trim()
+        return if (filesStamp.isNotEmpty() && filesStamp == toolStamp) filesStamp else ""
     }
 
     /** The environment remembers the stamp it was built with. */
     private fun storePayloadStamp(stamp: String) {
         runCatching { File(files, PAYLOAD_STAMP_FILE).writeText(stamp) }
+        runCatching {
+            if (tool.isDirectory) File(tool, PAYLOAD_STAMP_FILE).writeText(stamp)
+        }
     }
 
     /**

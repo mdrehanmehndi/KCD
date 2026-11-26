@@ -502,10 +502,13 @@ class Port:
         if not re.fullmatch(r'[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+', self.package): raise BuildError(f'not a package name: {self.package}')
         say(f'game profile: {g.id} {g.get("name", "")} (Android: {ap.status}' + (f', tested on {ap.tested}' if ap.tested else '') + ')')
         if ap.vulkan_driver == 'turnip' and not o.vulkan_driver and not self.driver_system:   # android.tsv vulkan_driver turnip: the driver the profile was tested with
-            lib = toolchain.find_turnip(self.cfg)
-            if lib: o.vulkan_driver = lib.resolve(); say(f"the profile asks for Mesa's Turnip driver (vulkan_driver turnip): {lib} is packed (--vulkan-driver system: the device's driver)")
-            else: say("[RED] the profile asks for Mesa's Turnip driver (vulkan_driver turnip), and none was found: the device's own driver is used. "
-                      "Give one with --vulkan-driver <libvulkan_freedreno.so>, or porter config turnip <path>")
+            if o.app:
+                say("the profile asks for Mesa's Turnip driver (vulkan_driver turnip): the app's Vulkan driver setting applies at launch")
+            else:
+                lib = toolchain.find_turnip(self.cfg)
+                if lib: o.vulkan_driver = lib.resolve(); say(f"the profile asks for Mesa's Turnip driver (vulkan_driver turnip): {lib} is packed (--vulkan-driver system: the device's driver)")
+                else: say("[RED] the profile asks for Mesa's Turnip driver (vulkan_driver turnip), and none was found: the device's own driver is used. "
+                          "Give one with --vulkan-driver <libvulkan_freedreno.so>, or porter config turnip <path>")
         builds, need = g.builds(), g.words('shader_versions')
         have = nsp.nsp_versions(self.fam, builds)
         self.derived, self.derived_mem, self.lost = '', '', []
