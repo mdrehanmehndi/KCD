@@ -293,7 +293,7 @@ DM_VK_MEM_DIAG	bool		debug	start	gfx_vk_core.c	enabled storage-image features (e
 DM_VK_MIP_MAX	int		debug	start	gfx_vk_tex.c	caps every sampler's `maxLod` at that level (0: always the base level; a sampler that already stops lower keeps its own, and `minLod` is lowered to it too): tells whether a flat material is the mip choice or the texture / UVs
 DM_VK_MT_REPLAY	bool	0	profile	start	gfx_vk_dq.c	two-stage replay: the vkCmd* calls (40 of them) are copied into a 32 MB ring and a "vk record" thread makes the real calls in order; the calls that end, submit or present a command buffer (and pool resets, waits) wait for the ring to empty first; a call with a pNext the copy does not know runs direc
 DM_VK_NAN_MINMAX	str		debug	?	gfx_vk_shader.c	
-DM_VK_NAN_SANITIZE	bool	0	profile	start	gfx_vk_shader.c	1 = sanitize NaN/Inf on fragment color output OpStore while keeping internal math and RelaxedPrecision
+DM_VK_NAN_SANITIZE	bool	0	profile	start	gfx_vk_shader.c	1 = sanitize NaN/Inf from math ops (FS/CS) and non-builtin color output OpStore (FS)
 DM_VK_NOCULL	str		debug	start	gfx_vk_exec.c	no face culling (test for winding bugs)
 DM_VK_NOPCACHE	str		debug	start	gfx_vk_pipeline_cache.inc	start with an empty Vulkan pipeline cache (the saved one is ignored; app-owned files cannot be deleted over adb)
 DM_VK_NOPREWARM	str		debug	start	gfx_vk_exec.c	no pipeline prewarm, and no compute pipelines made ahead at the first submission

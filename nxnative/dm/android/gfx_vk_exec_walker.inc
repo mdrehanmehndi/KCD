@@ -185,6 +185,7 @@ static void exec_ops(const uint8_t *p) {
             int32_t bits = *(const int32_t *)a;
             if (g_x_listpasses) VKLOG("    barrier %#x%s", bits, g_order_keep && S.pass_open == 1 && !(bits & ~0x7) ? " (order only: decided at the next draw)" : "");
             if (g_order_keep && S.pass_open == 1 && !(bits & ~0x7)) { g_order_pending = 1; break; }   // (g_order_keep)
+            { static int once = 0; if (!g_order_keep && !once++) VKLOG("[PATCH] OP_BARRIER no-defer active"); }
             vk_end_pass(); vk_img_barrier_all(vk_cmd()); g_order_pending = 0; break; }
         case OP_SET_TEX_POOL: case OP_SET_SAMP_POOL: {   // bound handles were rebased when recorded (hle_nvn.c bind_handles); handles read from memory are rebased by these (mem_handle)
             const p_set_pool *sp = (const p_set_pool *)a; int base = sp->pool ? nvn_dpool_base(sp->pool, h.op == OP_SET_TEX_POOL) : 0;

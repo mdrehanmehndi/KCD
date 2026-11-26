@@ -204,6 +204,7 @@ static int swap_make(void) {
             VkFenceCreateInfo f = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, NULL, VK_FENCE_CREATE_SIGNALED_BIT}; VKCHK(vkCreateFence(V.dev, &f, NULL, &g_pfence[i]));
         }
     }
+    VKLOG("[PATCH] compositeAlpha=%#x (OPAQUE forced)", (unsigned)ci.compositeAlpha);
     if (g_pre != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) VKLOG("swapchain %ux%u format %d, %u images, pre-rotated (transform %#x; the window %ux%u)", g_next.width, g_next.height, g_sfmt, g_nsimg, (unsigned)g_pre, g_sext.width, g_sext.height);
     else VKLOG("swapchain %ux%u format %d, %u images%s", g_sext.width, g_sext.height, g_sfmt, g_nsimg, turn ? " (the compositor turns the picture)" : "");
     return 1;

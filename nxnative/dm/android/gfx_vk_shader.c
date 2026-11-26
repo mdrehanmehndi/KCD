@@ -158,23 +158,25 @@ static int spv_is_vec4(const uint32_t *w, uint32_t fn, uint32_t t) {   // a vec4
     return 0;
 }
 static void spv_io_locs(const uint32_t *w, uint32_t nw, uint32_t *in, uint32_t *out);
-// Sanitize NaN and Inf only at non-builtin fragment color output OpStore instructions, preserving internal ALU ops and RelaxedPrecision hints.
+// Sanitize NaN/Inf from math ops (FS/CS) and non-builtin color output OpStore (FS).
 static uint32_t *spv_nan_sanitize(const uint32_t *w, uint32_t nw, int stage, uint32_t *onw) {
-    if (nw < 5 || stage != 1) return NULL;
+    if (nw < 5 || (stage != 1 && stage != 5)) return NULL;
     uint32_t orig_bound = w[3];
     if (!orig_bound || orig_bound > (1u << 22)) return NULL;
-    uint32_t fn = nw, f32 = 0, b1 = 0;
+    uint32_t fn = nw, f32 = 0, b1 = 0, glsl = 0;
     uint32_t vec_t[5] = {0}, bvec_t[5] = {0};
     uint8_t *is_bi = calloc(orig_bound, 1);
     uint32_t *ptr_elem = calloc(orig_bound, 4);
     uint32_t *out_ptr = calloc(orig_bound, 4);
-    if (!is_bi || !ptr_elem || !out_ptr) goto fail;
+    uint8_t *sani_id = calloc(orig_bound, 1);
+    if (!is_bi || !ptr_elem || !out_ptr || !sani_id) goto fail;
 
     for (uint32_t i = 5; i < nw;) {
         uint32_t n = w[i] >> 16, op = w[i] & 0xffff;
         if (!n || i + n > nw) goto fail;
         if (op == 54) { fn = i; break; }
-        if (op == 71 && n >= 3 && w[i + 2] == 11 && w[i + 1] < orig_bound) is_bi[w[i + 1]] = 1;
+        if (op == 11 && n >= 3 && !memcmp(&w[i + 2], "GLSL.std.450", 12)) glsl = w[i + 1];
+        else if (op == 71 && n >= 3 && w[i + 2] == 11 && w[i + 1] < orig_bound) is_bi[w[i + 1]] = 1;
         else if (op == 20 && n == 2) b1 = w[i + 1];
         else if (op == 22 && n == 3 && w[i + 2] == 32) f32 = w[i + 1];
         else if (op == 23 && n == 4) {
@@ -186,7 +188,7 @@ static uint32_t *spv_nan_sanitize(const uint32_t *w, uint32_t nw, int stage, uin
         }
         else if (op == 32 && n == 4 && w[i + 2] == 3 && w[i + 1] < orig_bound) ptr_elem[w[i + 1]] = w[i + 3];
         else if (op == 59 && n >= 4 && w[i + 3] == 3 && w[i + 2] < orig_bound && w[i + 1] < orig_bound) {
-            if (!is_bi[w[i + 2]]) out_ptr[w[i + 2]] = ptr_elem[w[i + 1]];
+            if (stage == 1 && !is_bi[w[i + 2]]) out_ptr[w[i + 2]] = ptr_elem[w[i + 1]];
         }
         i += n;
     }
@@ -198,16 +200,27 @@ static uint32_t *spv_nan_sanitize(const uint32_t *w, uint32_t nw, int stage, uin
     for (uint32_t i = fn; i < nw;) {
         uint32_t n = w[i] >> 16, op = w[i] & 0xffff;
         if (!n || i + n > nw) goto fail;
-        if ((op == 65 || op == 66) && n >= 4) {
+        if (stage == 1 && (op == 65 || op == 66) && n >= 4) {
             uint32_t rt = w[i + 1], rid = w[i + 2], base = w[i + 3];
             if (base < orig_bound && out_ptr[base] && rt < orig_bound && rid < orig_bound && ptr_elem[rt])
                 out_ptr[rid] = ptr_elem[rt];
-        } else if (op == 62 && n >= 3) {
+        } else if (stage == 1 && op == 62 && n >= 3) {
             uint32_t ptr = w[i + 1];
             if (ptr < orig_bound && out_ptr[ptr]) {
                 uint32_t et = out_ptr[ptr]; int k = 0;
                 for (int j = 1; j <= 4; j++) if (vec_t[j] == et) { k = j; break; }
                 if (k) { need_k[k] = 1; nsani++; }
+            }
+        } else if (op == 136 && n == 5) {
+            uint32_t rt = w[i + 1], rid = w[i + 2]; int k = 0;
+            for (int j = 1; j <= 4; j++) if (vec_t[j] == rt) { k = j; break; }
+            if (k && rid < orig_bound) { need_k[k] = 1; sani_id[rid] = 1; nsani++; }
+        } else if (op == 12 && n >= 5 && glsl && w[i + 3] == glsl) {
+            uint32_t ex = w[i + 4];
+            if (ex == 16 || ex == 17 || (ex >= 25 && ex <= 32) || ex == 69) {
+                uint32_t rt = w[i + 1], rid = w[i + 2]; int k = 0;
+                for (int j = 1; j <= 4; j++) if (vec_t[j] == rt) { k = j; break; }
+                if (k && rid < orig_bound) { need_k[k] = 1; sani_id[rid] = 1; nsani++; }
             }
         }
         i += n;
@@ -237,17 +250,31 @@ static uint32_t *spv_nan_sanitize(const uint32_t *w, uint32_t nw, int stage, uin
     if (!o) goto fail;
     uint32_t no = 5;
     memcpy(o, w, 20);
-    memcpy(&o[no], &w[5], (size_t)(fn - 5) * 4); no += fn - 5;
+    for (uint32_t i = 5; i < fn;) {
+        uint32_t n = w[i] >> 16, op = w[i] & 0xffff;
+        if (!(op == 71 && n >= 3 && w[i + 2] == 42 && w[i + 1] < orig_bound && sani_id[w[i + 1]])) {
+            memcpy(&o[no], &w[i], (size_t)n * 4); no += n;
+        }
+        i += n;
+    }
     memcpy(&o[no], nt, (size_t)nnt * 4); no += nnt;
 
     for (uint32_t i = fn; i < nw;) {
         uint32_t n = w[i] >> 16, op = w[i] & 0xffff;
-        int k = 0;
-        if (op == 62 && n >= 3 && w[i + 1] < orig_bound && out_ptr[w[i + 1]]) {
+        int is_store = 0, is_math = 0, k = 0;
+        if (stage == 1 && op == 62 && n >= 3 && w[i + 1] < orig_bound && out_ptr[w[i + 1]]) {
             uint32_t et = out_ptr[w[i + 1]];
             for (int j = 1; j <= 4; j++) if (vec_t[j] == et) { k = j; break; }
+            if (k) is_store = 1;
+        } else if (op == 136 && n == 5 && w[i + 2] < orig_bound && sani_id[w[i + 2]]) {
+            for (int j = 1; j <= 4; j++) if (vec_t[j] == w[i + 1]) { k = j; break; }
+            if (k) is_math = 1;
+        } else if (op == 12 && n >= 5 && glsl && w[i + 3] == glsl && w[i + 2] < orig_bound && sani_id[w[i + 2]]) {
+            for (int j = 1; j <= 4; j++) if (vec_t[j] == w[i + 1]) { k = j; break; }
+            if (k) is_math = 1;
         }
-        if (k) {
+
+        if (is_store) {
             uint32_t val = w[i + 2];
             uint32_t inan = bound++, t1 = bound++, iinf = bound++, ipos = bound++, ilim = bound++, cln = bound++;
             uint32_t ft = vec_t[k], bt = bvec_t[k];
@@ -260,6 +287,19 @@ static uint32_t *spv_nan_sanitize(const uint32_t *w, uint32_t nw, int stage, uin
             memcpy(&o[no], &w[i], (size_t)n * 4);
             o[no + 2] = cln;
             no += n;
+        } else if (is_math) {
+            uint32_t rid = w[i + 2], raw = bound++;
+            uint32_t inan = bound++, t1 = bound++, iinf = bound++, ipos = bound++, ilim = bound++;
+            uint32_t ft = vec_t[k], bt = bvec_t[k];
+            memcpy(&o[no], &w[i], (size_t)n * 4);
+            o[no + 2] = raw;
+            no += n;
+            o[no++] = 4u << 16 | 156; o[no++] = bt; o[no++] = inan; o[no++] = raw;
+            o[no++] = 6u << 16 | 169; o[no++] = ft; o[no++] = t1;   o[no++] = inan; o[no++] = c0[k]; o[no++] = raw;
+            o[no++] = 4u << 16 | 157; o[no++] = bt; o[no++] = iinf; o[no++] = t1;
+            o[no++] = 5u << 16 | 186; o[no++] = bt; o[no++] = ipos; o[no++] = t1;   o[no++] = c0[k];
+            o[no++] = 6u << 16 | 169; o[no++] = ft; o[no++] = ilim; o[no++] = ipos; o[no++] = cp[k]; o[no++] = cn[k];
+            o[no++] = 6u << 16 | 169; o[no++] = ft; o[no++] = rid;  o[no++] = iinf; o[no++] = ilim;  o[no++] = t1;
         } else {
             memcpy(&o[no], &w[i], (size_t)n * 4);
             no += n;
@@ -268,10 +308,10 @@ static uint32_t *spv_nan_sanitize(const uint32_t *w, uint32_t nw, int stage, uin
     }
     o[3] = bound;
     *onw = no;
-    free(is_bi); free(ptr_elem); free(out_ptr);
+    free(is_bi); free(ptr_elem); free(out_ptr); free(sani_id);
     return o;
 fail:
-    free(is_bi); free(ptr_elem); free(out_ptr);
+    free(is_bi); free(ptr_elem); free(out_ptr); free(sani_id);
     return NULL;
 }
 static void spv_io_locs(const uint32_t *w, uint32_t nw, uint32_t *in, uint32_t *out) {
@@ -473,9 +513,9 @@ static vkshader_t *vk_shader_q(uint64_t key, int stage, int quiet) {
           else if (op == 12 && n >= 5 && glsl && w[i + 3] == glsl) { uint32_t *x = &w[i + 4];   // OpExtInst: FMin 37 → NMin 79, FMax 40 → NMax 80, FClamp 43 → NClamp 81
               if (*x == 37) *x = 79; else if (*x == 40) *x = 80; else if (*x == 43) *x = 81; }
           i += n; } }
-    { static int san = -1; if (san < 0) { const char *e = getenv("DM_VK_NAN_SANITIZE"); san = e && atoi(e) != 0; }
-      if (san && stage == 1) { uint32_t n2 = 0, *w2 = spv_nan_sanitize(w, nw, stage, &n2);
-          if (w2) { free(w); w = w2; nw = n2; } } }
+    { static int san = -1, once = 0; if (san < 0) { const char *e = getenv("DM_VK_NAN_SANITIZE"); san = e && atoi(e) != 0; }
+      if (san && (stage == 1 || stage == 5)) { uint32_t n2 = 0, *w2 = spv_nan_sanitize(w, nw, stage, &n2);
+          if (w2) { free(w); w = w2; nw = n2; if (!once++) VKLOG("[PATCH] SPIR-V NaN/Inf sanitizer active"); } } }
     spv_io_locs(w, nw, &s->in_locs, &s->out_locs);
     VkShaderModuleCreateInfo ci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0, (size_t)nw * 4, w};
     VkResult vr = vkCreateShaderModule(V.dev, &ci, NULL, &s->mod); s->spv = w; s->nspv = nw;

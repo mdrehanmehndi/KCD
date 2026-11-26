@@ -141,7 +141,7 @@ class KcdProfilesTest(unittest.TestCase):
 
 
 class SpvNanSanitizeTest(unittest.TestCase):
-    def test_sanitizes_only_fragment_output_stores_and_keeps_relaxed_precision(self):
+    def test_sanitizes_fragment_stores_and_alu_math_and_strips_relaxed_precision(self):
         cc = shutil.which('cc') or shutil.which('clang')
         if not cc:
             self.skipTest('no C compiler available')
@@ -161,7 +161,7 @@ int main(void) {
        %1 = f32, %2 = vec4(f32), %3 = ptr_out(vec4), %4 = out_var(Location 0)
        %5 = internal fdiv result with RelaxedPrecision decoration (42)
        %6 = ptr_bi(vec4), %7 = builtin var (FragDepth-like BuiltIn 11)
-       Function computes %5 = OpFDiv %2 %10 %11 (unused dummies ok for structural pass) and stores %5 to %4, and stores %5 to %7.
+       Function computes %5 = OpFDiv %2 %10 %11 and stores %5 to %4, and stores %5 to %7.
     */
     uint32_t w[] = {
         0x07230203u, 0x00010000u, 0u, 12u, 0u,
@@ -180,7 +180,28 @@ int main(void) {
     };
     uint32_t nw = (uint32_t)(sizeof(w) / 4);
     uint32_t onw = 0;
-    if (spv_nan_sanitize(w, nw, 5, &onw) != NULL) return 2;   /* compute stage must return NULL */
+
+    /* Compute stage (5) MUST also sanitize internal math (OpFDiv) */
+    uint32_t *oc = spv_nan_sanitize(w, nw, 5, &onw);
+    if (!oc) return 2;
+    int c_relaxed = 0, c_fdiv = 0, c_isnan = 0, c_isinf = 0;
+    for (uint32_t i = 5; i < onw;) {
+        uint32_t n = oc[i] >> 16, op = oc[i] & 0xffff;
+        if (!n || i + n > onw) return 10;
+        if (op == 71 && oc[i + 1] == 5 && oc[i + 2] == 42) c_relaxed++;
+        else if (op == 136) { c_fdiv++; if (oc[i + 2] == 5) return 11; }
+        else if (op == 156) c_isnan++;
+        else if (op == 157) c_isinf++;
+        i += n;
+    }
+    free(oc);
+    if (c_relaxed != 0 || c_fdiv != 1 || c_isnan != 1 || c_isinf != 1) {
+        fprintf(stderr, "compute counts: relaxed=%d fdiv=%d isnan=%d isinf=%d\n", c_relaxed, c_fdiv, c_isnan, c_isinf);
+        return 12;
+    }
+
+    /* Fragment stage (1) must sanitize both OpFDiv and non-builtin OpStore %4, stripping RelaxedPrecision on %5 */
+    onw = 0;
     uint32_t *o = spv_nan_sanitize(w, nw, 1, &onw);
     if (!o) return 3;
     int relaxed = 0, fdiv = 0, isnan = 0, isinf = 0, stores_to_4 = 0, stores_to_7 = 0;
@@ -188,7 +209,7 @@ int main(void) {
         uint32_t n = o[i] >> 16, op = o[i] & 0xffff;
         if (!n || i + n > onw) return 4;
         if (op == 71 && o[i + 1] == 5 && o[i + 2] == 42) relaxed++;
-        else if (op == 136) { fdiv++; if (o[i + 2] != 5) return 5; }
+        else if (op == 136) { fdiv++; if (o[i + 2] == 5) return 5; }
         else if (op == 156) isnan++;
         else if (op == 157) isinf++;
         else if (op == 62 && o[i + 1] == 4) { stores_to_4++; if (o[i + 2] == 5) return 6; }
@@ -196,8 +217,8 @@ int main(void) {
         i += n;
     }
     free(o);
-    if (relaxed != 1 || fdiv != 1 || isnan != 1 || isinf != 1 || stores_to_4 != 1 || stores_to_7 != 1) {
-        fprintf(stderr, "unexpected counts: relaxed=%d fdiv=%d isnan=%d isinf=%d s4=%d s7=%d\n",
+    if (relaxed != 0 || fdiv != 1 || isnan != 2 || isinf != 2 || stores_to_4 != 1 || stores_to_7 != 1) {
+        fprintf(stderr, "fragment counts: relaxed=%d fdiv=%d isnan=%d isinf=%d s4=%d s7=%d\n",
                 relaxed, fdiv, isnan, isinf, stores_to_4, stores_to_7);
         return 8;
     }
@@ -212,6 +233,20 @@ int main(void) {
             self.assertEqual(comp.returncode, 0, comp.stderr)
             run = subprocess.run([str(exe)], capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_unlzss_initializes_ring_with_spaces(self):
+        tools_dir = str(REPO / 'nxnative/dm/gfx/tools')
+        env = dict(os.environ, DM_GAME='010021601C496000')
+        # VerifyCryEngine LZSS back-reference at offset 4078..4095 reads 0x20 (' ') not 0x00
+        code = (
+            'import sys; sys.argv=["shader_split.py"]; sys.path.insert(0, %r); '
+            'import shader_split as ss; '
+            'payload = bytes([0x00, 0xee, 0xf2]); '  # flag=0 -> back-ref off=0x0fee (4078), len=(2+3)=5
+            'out = ss.unlzss(payload, 5); '
+            'assert out == b"     ", f"got {out!r}"'
+        ) % tools_dir
+        res = subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr + res.stdout)
 
 
 class VirtualBufferInitTest(unittest.TestCase):

@@ -175,6 +175,7 @@ static pthread_mutex_t g_img_mu = PTHREAD_MUTEX_INITIALIZER;
 // peers. A family admits a metadata peer only after that exact format has joined;
 // metadata then closes membership, while existing aliases keep their shared data.
 static unsigned texture_family_bit(NVNformat format) {
+    { static int once = 0; if ((format >= 0x41 && format <= 0x4e) || (format >= 0x79 && format <= 0x94)) { if (!once++) VKLOG("[PATCH] BC/ASTC sRGB family active"); } }
     switch (format) {
     case NVN_FORMAT_RGBA8: case NVN_FORMAT_BGRA8: return 1;
     case NVN_FORMAT_RGBA8_SRGB: case NVN_FORMAT_BGRA8_SRGB: return 2;

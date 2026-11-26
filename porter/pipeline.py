@@ -1449,6 +1449,8 @@ class Port:
         if romfs.is_dir() and getattr(self.ap, 'romfs_files', None):
             for rel, content in self.ap.romfs_files.items():
                 target = romfs / rel; target.parent.mkdir(parents=True, exist_ok=True)
+                # Break any existing hardlink/read-only file before writing profile RomFS files
+                if target.exists() or target.is_symlink(): target.unlink()
                 target.write_text(content, encoding='utf-8', newline='\n')
         if getattr(self.ap, 'romfs_zstd', False) and romfs.is_dir():   # android.tsv romfs zstd: packed copies of the files that compress, made once into the build folder; the rest stay links to the extraction
             PROG.set(step='compressing the RomFS', done=0, total=1, unit='B')

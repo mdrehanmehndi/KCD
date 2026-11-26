@@ -1110,7 +1110,10 @@ def raw_shaders(d, label, known=()):
         nctl, n = struct.unpack_from('<I', d, c + 0x20)[0], struct.unpack_from('<I', d, c + 0x704)[0]
         ctl, why = d[c:c + nctl], 'no code area: no data record points at one, and the code builds the address of none right after or right before it'
         near = lambda k: min(abs(a - b) for a in built[k] for b in built[c])   # how close the code builds this code area's address to the control section's
-        for k in ([code_of[c]] if c in code_of else sorted((k for k in ((c + nctl + 15) & ~15, c - n) if k in built and c in built and near(k) < 0x400), key=near)):
+        cands = ([code_of[c]] if c in code_of else sorted((k for k in ((c + nctl + 15) & ~15, c - n) if k in built and c in built and near(k) < 0x400), key=near))
+        if not cands and c - n >= 0x60 and (c - n - 0x60) in built and d[c - n - 0x18:c - n - 0x10] == b'Shader\0\0' and struct.unpack_from('<II', d, c - n - 0xc) == (n, nctl):
+            cands = [c - n]   # CryEngine-style embedded Shader wrapper in .rodata: code sits immediately before ctl with a 0x60 header built via adrp+add
+        for k in cands:
             code = d[k:k + n]; st = glslc_stage(ctl, code) if k >= 0 and CTL_MAGIC not in code else None
             if st and not check(label, st, ctl, code): out.append((f'{label}#RAW@{c:#x}', st, ctl, code)); why = None; break
         if why: print(f'[RED] {label} control section @{c:#x}: {why}; left out', flush=True)
@@ -1990,7 +1993,7 @@ def mvgl_nvn_shaders(path, label):
 
 def unlzss(src, usize):
     """Decompress CryEngine CPCK LZSS payload into usize raw bytes."""
-    ring = bytearray(4096); r = 4078; i = 0; n = len(src); out = bytearray(); app = out.append
+    ring = bytearray(b' ' * 4096); r = 4078; i = 0; n = len(src); out = bytearray(); app = out.append
     while i < n and len(out) < usize:
         fl = src[i]; i += 1
         for b in range(8):
