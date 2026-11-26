@@ -178,18 +178,8 @@ object DevSync {
         if (devShadersDir.isDirectory) {
             syncTree(devShadersDir, File(effectivePorted.pack, "shaders"), prefix = "shaders", pulled = pulled)
         }
-        val profileTarget = File(nxHomeDir, "profiles/${effectivePorted.titleId.uppercase()}")
-        val devProfileDir = File(devDir, "profile")
-        if (devProfileDir.isDirectory) {
-            syncTree(devProfileDir, profileTarget, prefix = "profile", pulled = pulled)
-        }
-        devDir.listFiles()?.forEach { f ->
-            if (f.isFile && (f.name.endsWith(".tsv") || f.name == "patches.py") && !File(devProfileDir, f.name).isFile) {
-                if (syncFileIfChanged(f, File(profileTarget, f.name))) {
-                    pulled.add(f.name)
-                }
-            }
-        }
+        val profileSynced = syncProfileFilesForGame(devDir, nxHomeDir, effectivePorted.titleId.uppercase())
+        pulled.addAll(profileSynced)
 
         // 5. Sync libdmplay.so (and optional hook .so files) into files/runtimes/<lowercase_title_id>/ and refresh build.json.
         val stagedBins = collectRuntimeBinaries(devDir)
@@ -331,6 +321,45 @@ object DevSync {
             total += exportOutputs(p.pack, p.titleId, p, deviceText, devRoot).size
         }
         return total
+    }
+
+    /**
+     * Pulls any staged `.tsv` / `patches.py` files from `/sdcard/Download/nx2a_dev/<tid>/profile/`
+     * (and top-level `*.tsv`) into `files/nx2a/profiles/<UPPERCASE_TID>/` even before a game is ported.
+     */
+    fun syncStagedProfiles(
+        nxHomeDir: File,
+        devRoot: File = defaultDevRoot(),
+    ): List<String> {
+        if (!devRoot.isDirectory || !devRoot.canRead()) return emptyList()
+        val synced = ArrayList<String>()
+        val dirs = devRoot.listFiles() ?: return emptyList()
+        for (devDir in dirs) {
+            if (!devDir.isDirectory || !TITLE_ID_RE.matches(devDir.name)) continue
+            val tidUpper = devDir.name.uppercase()
+            val files = syncProfileFilesForGame(devDir, nxHomeDir, tidUpper)
+            for (name in files) {
+                synced.add("${devDir.name.lowercase()}/$name")
+            }
+        }
+        return synced
+    }
+
+    private fun syncProfileFilesForGame(devDir: File, nxHomeDir: File, titleIdUpper: String): List<String> {
+        val pulled = ArrayList<String>()
+        val profileTarget = File(nxHomeDir, "profiles/$titleIdUpper")
+        val devProfileDir = File(devDir, "profile")
+        if (devProfileDir.isDirectory) {
+            syncTree(devProfileDir, profileTarget, prefix = "profile", pulled = pulled)
+        }
+        devDir.listFiles()?.forEach { f ->
+            if (f.isFile && (f.name.endsWith(".tsv") || f.name == "patches.py") && !File(devProfileDir, f.name).isFile) {
+                if (syncFileIfChanged(f, File(profileTarget, f.name))) {
+                    pulled.add(f.name)
+                }
+            }
+        }
+        return pulled
     }
 
     private fun ensureWritableDir(dir: File): Boolean {

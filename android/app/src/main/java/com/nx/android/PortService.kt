@@ -17,7 +17,9 @@ import com.nx.android.appstate.porting.PortCompletionCoordinator
 import com.nx.android.core.storage.AppPaths
 import com.nx.android.data.AppLocale
 import com.nx.android.data.AppLog
+import com.nx.android.data.DevSync
 import com.nx.android.data.PortRunner
+import com.nx.android.data.ProfilesPack
 import com.nx.android.domain.ALIAS_AUTO
 import com.nx.android.domain.GameConfig
 import com.nx.android.domain.GameIdentity
@@ -171,6 +173,11 @@ class PortService : Service() {
         }
         val taskId = port.buildId
         startForeground(1, notification())
+        ProfilesPack.ensureBundled(this, File(paths.nxHome, "profiles"))
+        val devSynced = DevSync.syncStagedProfiles(paths.nxHome)
+        if (devSynced.isNotEmpty()) {
+            AppLog.line("[dev-sync] pre-port synced profiles: ${devSynced.joinToString(", ")}")
+        }
         val handler = Handler(mainLooper)
         lateinit var taskRunner: PortRunner
         taskRunner = PortRunner(environmentSetup, guestLauncher, locale::str, File(paths.files, "nx2a/port_exit.txt")) { line ->

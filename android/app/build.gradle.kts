@@ -60,7 +60,44 @@ val copyGameList by tasks.registering(Copy::class) {
     rename { "port_checklist.md" }
 }
 
-tasks.named("preBuild").configure { dependsOn(generatePlayerApiRevision, copyGameList) }
+// Built-in game profiles bundled directly into the APK (assets/profiles/<TITLE_ID>/) so KCD works offline out of the box.
+val bundledProfilesAssets = layout.buildDirectory.dir("generated/bundledProfiles")
+val copyBundledProfiles by tasks.registering {
+    val kcdTitleIds = listOf("010021601C496000", "0100650018FE0000")
+    kcdTitleIds.forEach { tid ->
+        val dir = rootProject.file("../nxnative/dm/games/$tid")
+        if (dir.isDirectory) inputs.dir(dir)
+    }
+    outputs.dir(bundledProfilesAssets)
+    doLast {
+        val root = bundledProfilesAssets.get().asFile
+        val outDir = root.resolve("profiles")
+        outDir.deleteRecursively()
+        outDir.mkdirs()
+        val ids = ArrayList<String>()
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        for (tid in kcdTitleIds) {
+            val srcDir = rootProject.file("../nxnative/dm/games/$tid")
+            if (!srcDir.isDirectory) continue
+            ids.add(tid)
+            val dstDir = outDir.resolve(tid)
+            dstDir.mkdirs()
+            srcDir.listFiles()?.sortedBy { it.name }?.forEach { f ->
+                if (f.isFile && !f.name.startsWith(".")) {
+                    val bytes = f.readBytes()
+                    dstDir.resolve(f.name).writeBytes(bytes)
+                    md.update("$tid/${f.name}\n".toByteArray(Charsets.UTF_8))
+                    md.update(bytes)
+                }
+            }
+        }
+        val hash = md.digest().joinToString("") { "%02x".format(it) }
+        val idsJson = ids.joinToString(",") { "\"$it\"" }
+        outDir.resolve("bundled.json").writeText("{\"ids\":[$idsJson],\"sha256\":\"$hash\"}\n", Charsets.UTF_8)
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn(generatePlayerApiRevision, copyGameList, copyBundledProfiles) }
 
 android {
     namespace = "com.nx.android"
@@ -99,6 +136,7 @@ android {
             java.srcDir(revisionSources.get().asFile)
             // The list of the games the porter knows: copied into the assets by the task above
             assets.srcDir(gameListAssets.get().asFile)
+            assets.srcDir(bundledProfilesAssets.get().asFile)
             // The payload (the environment in one archive, the driver): built by packaging/android-apk/build_assets.py.
             // -PnoPayload leaves it out: a quick build of the app itself, for a phone that already has the
             // environment unpacked (the unpacked tree is in the app's own folder, so it survives the update).

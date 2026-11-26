@@ -60,6 +60,7 @@ import com.nx.android.data.Gamespec
 import com.nx.android.data.LogBundle
 import com.nx.android.data.Player
 import com.nx.android.data.PrefsStore
+import com.nx.android.data.ProfilesPack
 import com.nx.android.data.porting.BuildSessionRepository
 import com.nx.android.core.storage.AppPaths
 import androidx.core.content.FileProvider
@@ -225,6 +226,16 @@ class MainActivity : ComponentActivity() {
         // It happens here, at the app's start, before any port: a port that is running is never interrupted.
         envBuild.startIfNeeded()
         lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                ProfilesPack.ensureBundled(this@MainActivity, File(paths.nxHome, "profiles"))
+                if (prefs.bool(PrefsStore.DEV_AUTO_SYNC, true) && storageGranted()) {
+                    val synced = DevSync.syncStagedProfiles(paths.nxHome)
+                    if (synced.isNotEmpty()) {
+                        AppLog.line("[dev-sync] synced staged profiles: ${synced.joinToString(", ")}")
+                    }
+                }
+            }
+            envCheck.refreshProfiles()
             drivers.ensureShipped()
             drivers.refresh()
         }

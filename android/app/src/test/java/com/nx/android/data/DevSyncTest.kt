@@ -171,4 +171,24 @@ class DevSyncTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun `syncStagedProfiles pulls tsv updates into nx2a profiles layer before porting`() {
+        val root = Files.createTempDirectory("dev-staged-profiles").toFile()
+        try {
+            val nxHome = File(root, "nx2a").apply { mkdirs() }
+            val devRoot = File(root, "nx2a_dev").apply { mkdirs() }
+            val prof = File(devRoot, "010021601c496000/profile").apply { mkdirs() }
+            File(prof, "game.tsv").writeText("small_vpool_sparse\ton\n")
+            File(prof, "android.tsv").writeText("status\twip\n")
+
+            val synced = DevSync.syncStagedProfiles(nxHome, devRoot)
+            assertTrue(synced.contains("010021601c496000/profile/game.tsv"))
+            assertTrue(synced.contains("010021601c496000/profile/android.tsv"))
+            assertEquals("small_vpool_sparse\ton\n", File(nxHome, "profiles/010021601C496000/game.tsv").readText())
+            assertEquals("status\twip\n", File(nxHome, "profiles/010021601C496000/android.tsv").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

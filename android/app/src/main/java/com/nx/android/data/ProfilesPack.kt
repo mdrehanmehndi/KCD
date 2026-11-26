@@ -26,14 +26,113 @@ class ProfilesPack(private val ids: Set<String>, private val layer: File) {
     fun stale(titleId: String): Boolean = titleId.isNotEmpty() && has(titleId) && !imported(titleId)
 
     companion object {
+        const val BUNDLED_MANIFEST = "profiles/bundled.json"
+        const val BUNDLED_STAMP_FILE = ".nx2a-bundled-sha256"
+
         /** The package of this build, read from the app's own assets */
         fun of(app: Context, layer: File): ProfilesPack = ProfilesPack(readIds(app), layer)
 
-        /** The title IDs the package holds (assets/profiles.json) */
-        private fun readIds(app: Context): Set<String> = runCatching {
-            val text = app.assets.open("profiles.json").use { it.readBytes().toString(Charsets.UTF_8) }
-            val array = JSONObject(text).optJSONArray("ids") ?: return emptySet()
-            (0 until array.length()).map { array.optString(it) }.filter { it.isNotEmpty() }.toSet()
-        }.getOrDefault(emptySet())
+        /**
+         * Ensures built-in APK profiles (`assets/profiles/<TITLE_ID>/`) are extracted into the player's
+         * `nx2a/profiles/` layer so supported games port and run out of the box without downloading the full zip.
+         */
+        fun ensureBundled(app: Context, layer: File, force: Boolean = false): Boolean {
+            val manifestText = runCatching {
+                app.assets.open(BUNDLED_MANIFEST).use { it.readBytes().toString(Charsets.UTF_8) }
+            }.getOrNull() ?: return false
+            val json = runCatching { JSONObject(manifestText) }.getOrNull() ?: return false
+            val array = json.optJSONArray("ids") ?: return false
+            val sha256 = json.optString("sha256", "")
+            var changed = false
+            for (i in 0 until array.length()) {
+                val tid = array.optString(i).trim()
+                if (tid.isEmpty()) continue
+                val assetFiles = runCatching { app.assets.list("profiles/$tid") }.getOrNull()?.filter { it.isNotEmpty() }
+                    ?: continue
+                changed = installProfile(
+                    layer = layer,
+                    titleId = tid,
+                    sha256 = sha256,
+                    fileNames = assetFiles,
+                    force = force,
+                    openFile = { name -> app.assets.open("profiles/$tid/$name").use { it.readBytes() } },
+                ) || changed
+            }
+            return changed
+        }
+
+        /** Pure-filesystem entry point for JVM tests and directory-based bundles. */
+        internal fun installBundledFromDirectory(sourceProfilesDir: File, layer: File, force: Boolean = false): Boolean {
+            val manifest = File(sourceProfilesDir, "bundled.json")
+            if (!manifest.isFile) return false
+            val json = runCatching { JSONObject(manifest.readText(Charsets.UTF_8)) }.getOrNull() ?: return false
+            val array = json.optJSONArray("ids") ?: return false
+            val sha256 = json.optString("sha256", "")
+            var changed = false
+            for (i in 0 until array.length()) {
+                val tid = array.optString(i).trim()
+                if (tid.isEmpty()) continue
+                val srcDir = File(sourceProfilesDir, tid)
+                if (!srcDir.isDirectory) continue
+                val files = srcDir.listFiles()?.filter { it.isFile && !it.name.startsWith(".") }?.map { it.name }
+                    ?: continue
+                changed = installProfile(
+                    layer = layer,
+                    titleId = tid,
+                    sha256 = sha256,
+                    fileNames = files,
+                    force = force,
+                    openFile = { name -> File(srcDir, name).readBytes() },
+                ) || changed
+            }
+            return changed
+        }
+
+        private fun installProfile(
+            layer: File,
+            titleId: String,
+            sha256: String,
+            fileNames: List<String>,
+            force: Boolean,
+            openFile: (String) -> ByteArray,
+        ): Boolean {
+            if (fileNames.isEmpty()) return false
+            val targetDir = File(layer, titleId)
+            val stamp = File(targetDir, BUNDLED_STAMP_FILE)
+            val currentStamp = runCatching { if (stamp.isFile) stamp.readText(Charsets.UTF_8).trim() else "" }.getOrDefault("")
+            if (!force && File(targetDir, "game.tsv").isFile && sha256.isNotEmpty() && currentStamp == sha256) {
+                return false
+            }
+            targetDir.mkdirs()
+            for (name in fileNames) {
+                val bytes = openFile(name)
+                val dst = File(targetDir, name)
+                val existing = if (dst.isFile && dst.length() == bytes.size.toLong()) runCatching { dst.readBytes() }.getOrNull() else null
+                if (existing == null || !existing.contentEquals(bytes)) {
+                    val tmp = File(targetDir, "$name.tmp")
+                    tmp.writeBytes(bytes)
+                    if (dst.exists()) dst.delete()
+                    if (!tmp.renameTo(dst)) tmp.copyTo(dst, overwrite = true).also { tmp.delete() }
+                }
+            }
+            if (sha256.isNotEmpty()) stamp.writeText(sha256 + "\n", Charsets.UTF_8)
+            return true
+        }
+
+        /** The title IDs the package or built-in bundle holds */
+        private fun readIds(app: Context): Set<String> {
+            val out = LinkedHashSet<String>()
+            for (asset in listOf("profiles.json", BUNDLED_MANIFEST)) {
+                runCatching {
+                    val text = app.assets.open(asset).use { it.readBytes().toString(Charsets.UTF_8) }
+                    val array = JSONObject(text).optJSONArray("ids") ?: return@runCatching
+                    for (i in 0 until array.length()) {
+                        val id = array.optString(i).trim()
+                        if (id.isNotEmpty()) out.add(id)
+                    }
+                }
+            }
+            return out
+        }
     }
 }

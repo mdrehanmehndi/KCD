@@ -13,6 +13,7 @@ import com.nx.android.data.PrefsStore
 import com.nx.android.data.PortRunner
 import com.nx.android.data.PhantomFix
 import com.nx.android.data.ProfilesDownloader
+import com.nx.android.data.ProfilesPack
 import com.nx.android.data.UpdateChecker
 import com.nx.android.domain.DoctorOutput
 import com.nx.android.domain.EnvCheck
@@ -198,17 +199,25 @@ class EnvCheckState @Inject constructor(
         profilesDiffer = false
         profilesPorted = 0
         val layer = File(paths.nxHome, "profiles")
+        val localDirs = layer.listFiles()?.filter {
+            it.isDirectory && File(it, "game.tsv").isFile
+        } ?: emptyList()
+        profilesPorted = localDirs.count { File(it, "android.tsv").isFile }
         val receipt = File(layer, "manifest.json")
-        if (!receipt.isFile) return
-        val text = runCatching { receipt.readText() }.getOrNull() ?: return
-        val json = runCatching { JSONObject(text) }.getOrNull() ?: return
-        profilesCount = json.optInt("count", 0)
-        profilesLabel = "r${json.optInt("revision", 0)}"
-        // the digests: the player's package against this build's. A different one is not wrong, it is another one.
-        val theirs = json.optString("sha256", "")
-        profilesDiffer = profilesExpected.isNotEmpty() && theirs.isNotEmpty() && theirs != profilesExpected
-        // the ported ones: the profiles that carry an android.tsv (the layer mirrors the game's own tree)
-        profilesPorted = layer.listFiles()?.count { it.isDirectory && File(it, "android.tsv").isFile } ?: 0
+        val json = if (receipt.isFile) {
+            runCatching { JSONObject(receipt.readText()) }.getOrNull()
+        } else null
+        if (json != null) {
+            profilesCount = maxOf(json.optInt("count", 0), localDirs.size)
+            profilesLabel = "r${json.optInt("revision", 0)}"
+            // the digests: the player's package against this build's. A different one is not wrong, it is another one.
+            val theirs = json.optString("sha256", "")
+            profilesDiffer = profilesExpected.isNotEmpty() && theirs.isNotEmpty() && theirs != profilesExpected
+        } else if (localDirs.isNotEmpty()) {
+            profilesCount = localDirs.size
+            profilesLabel = "built-in"
+            profilesDiffer = false
+        }
     }
 
     /**
@@ -350,6 +359,9 @@ class EnvCheckState @Inject constructor(
         val buf = StringBuilder()
         PortRunner(env, guestLauncher, locale::str) { line -> buf.appendLine(line) }
             .importProfiles(packageFile.absolutePath) { code ->
+                if (code == 0) {
+                    ProfilesPack.ensureBundled(app, File(paths.nxHome, "profiles"), force = true)
+                }
                 importingProfiles = false
                 readProfiles()
                 val ok = code == 0
