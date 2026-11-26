@@ -522,8 +522,28 @@ class Port:
         self.have = have
         self.aw = self.work / 'android'; self.logs = self.work / 'logs'
         for d in (self.aw, self.logs, self.work / 'tmp'): d.mkdir(parents=True, exist_ok=True)
+        if (layer := profiles_layer.layer_dir()).is_dir():
+            self.use_profile_dir(layer, first=False)
+        # Profiles without populated shader tables (e.g. 0100650018FE0000 before US/EU dump verification)
+        # derive exact tables into the work profile dir so shader_split and shader_vk stay consistent.
+        self.derive_shaders = not self.provisional and not self._has_shader_rows(g.table('shader_map.tsv'))
+        if self.derive_shaders:
+            pdir = self.work / 'profile'; d = pdir / g.id
+            if not (d / 'game.tsv').is_file():
+                nsp.rmtree(d); shutil.copytree(g.dir, d, ignore=shutil.ignore_patterns('__pycache__'))
+            self.use_profile_dir(pdir, first=True)
+            self.g = game.load(g.id); self.ap = android_profile.AndroidProfile(self.g)
         # DM_GAME picks the profile for every tool; WORK keeps their temporary folders inside the build folder (the shader translator writes thousands of files)
-        self.env.update(DM_GAME=g.id, DM_ROOT=str(self.work), WORK=str(self.work / 'tmp'))
+        self.env.update(DM_GAME=self.g.id, DM_ROOT=str(self.work), WORK=str(self.work / 'tmp'))
+
+    @staticmethod
+    def _has_shader_rows(path):
+        if not path.is_file(): return False
+        for ln in path.read_text(encoding='utf-8', errors='replace').splitlines():
+            s = ln.strip()
+            if s and not s.startswith('#') and not s.startswith('package\t'):
+                return True
+        return False
 
     def check_space(self):
         """Stop before extracting when the game folder's drive cannot hold the port: a build folder takes about 1 to 2 times the game files (NEO 7.0 GB of 6.8,
@@ -1168,9 +1188,10 @@ class Port:
         try:
             if getattr(self, 'glslc_why', ''): self.glslc_capture()   # shaders the game compiles at boot with its own GLSLC: the game's own compiler, here on the phone app or on the device
             if getattr(self, "ue_why", ""): self.device_ue()   # Unreal's shader code archives, decoded with the game's own Oodle (on the device, or here on the phone app) into <version dir>/ue_shaders before the split reads them
-            nsp.split_shaders(PY, NXNATIVE, [self.dirs[v] / 'RomFS' for v in sv], [self.dirs[v] / 'ExeFS/main' for v in sv], pkg, self.env, self.logs, self.g, bool(self.derived or self.provisional),
-                               oodle=getattr(self, 'oodle_run', None),   # Oodle-compressed archives: the game's own decoder (on the device, or here on the phone app)
-                               aoc=self.aoc)   # DLC with shaders of its own (Xenoblade Chronicles 3's archives)
+            nsp.split_shaders(PY, NXNATIVE, [self.dirs[v] / 'RomFS' for v in sv], [self.dirs[v] / 'ExeFS/main' for v in sv], pkg, self.env, self.logs, self.g,
+                              bool(self.derived or self.provisional or getattr(self, 'derive_shaders', False)),
+                              oodle=getattr(self, 'oodle_run', None),   # Oodle-compressed archives: the game's own decoder (on the device, or here on the phone app)
+                              aoc=self.aoc)   # DLC with shaders of its own (Xenoblade Chronicles 3's archives)
         finally: self.device_oodle_end()
         self.dmsv = self.aw / 'shaders.dmsv'; kf = self.aw / 'shaders.dmsv.key'; cap = self.aw / 'captured_shaders'
         PROG.stage('Vulkan shaders', step='building the translator')

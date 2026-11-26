@@ -45,7 +45,7 @@ def _fake_shader(stage, tag):
         struct.pack_into('<4I', ctl, 0x748, 8, 4, 1, 0)
         code = bytearray(ncode)
         code[0:4] = shader_split.CS_MAGIC
-        code[0x100:0x108] = tag
+        code[0x80:0x88] = tag
     else:
         st_idx = {'vs': 1, 'ps': 5}[stage]
         code = bytearray(ncode)
@@ -62,7 +62,10 @@ class CryPakShadersTest(unittest.TestCase):
         ctl3, code3 = _fake_shader('cs', b'SHAD_CS3')
         ctl4, code4 = _fake_shader('ps', b'SHAD_PS4')
 
-        # Blob 1 (uncompressed CPCK entry): ctl+code adjacent, 64B-aligned ctl+code, then code-before-ctl (cs)
+        # Blob 1 (uncompressed CPCK entry): ctl+code adjacent, 64B-aligned ctl+code, then code-before-ctl (cs),
+        # plus unaligned CTL_MAGIC (offset & 3 != 0) and CS_MAGIC before CTL_MAGIC with trailing non-magic data after ctl.
+        ctl5, code5 = _fake_shader('vs', b'SHAD_VS5')
+        ctl6, code6 = _fake_shader('cs', b'SHAD_CS6')
         blob1 = bytearray(ctl1 + code1)
         while len(blob1) & 63:
             blob1.append(0)
@@ -70,6 +73,9 @@ class CryPakShadersTest(unittest.TestCase):
         blob1.extend(b'\x00' * 32)   # 32B padding between ctl2 and aligned code2
         blob1.extend(code2)
         blob1.extend(code3 + ctl3)   # compute code right before ctl3
+        blob1.extend(b'\x01')        # force unaligned (offset & 3 != 0) vertex shader pair
+        blob1.extend(code5 + ctl5)
+        blob1.extend(code6 + ctl6 + b'\xff' * 0x200)   # trailing non-magic bytes after cs ctl6
 
         # Blob 2 (LZSS-compressed CPCK entry): another pixel shader
         blob2 = _lzss_store(ctl4 + code4)
@@ -92,8 +98,9 @@ class CryPakShadersTest(unittest.TestCase):
             found = []
             shader_split.cry_pak_shaders(str(pak), '/shaders.pak', found)
 
-        self.assertEqual(len(found), 4, f'expected 4 shaders, got {[x[0] for x in found]}')
-        self.assertEqual([x[1] for x in found], ['vs', 'ps', 'cs', 'ps'])
+        self.assertEqual(len(found), 6, f'expected 6 shaders, got {[x[0] for x in found]}')
+        self.assertEqual([x[1] for x in found], ['vs', 'ps', 'cs', 'vs', 'cs', 'ps'])
+        self.assertEqual(found[4][3], code6)
 
 
 class KcdProfilesTest(unittest.TestCase):
@@ -121,6 +128,16 @@ class KcdProfilesTest(unittest.TestCase):
             hdr = game.header(g)
             self.assertIn('#define DM_GAME_ORDER_KEEP 0', hdr)
             self.assertIn('#define DM_GAME_SMALL_VPOOL_SPARSE 1', hdr)
+
+    def test_header_only_shader_map_triggers_derive_mode_for_us_eu(self):
+        import importlib.util
+        if importlib.util.find_spec('lz4') is None:
+            self.skipTest('lz4 required for porter.pipeline')
+        if str(REPO) not in sys.path:
+            sys.path.insert(0, str(REPO))
+        from porter.pipeline import Port
+        self.assertTrue(Port._has_shader_rows(REPO / 'nxnative/dm/games/010021601C496000/shader_map.tsv'))
+        self.assertFalse(Port._has_shader_rows(REPO / 'nxnative/dm/games/0100650018FE0000/shader_map.tsv'))
 
 
 class SpvNanSanitizeTest(unittest.TestCase):

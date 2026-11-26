@@ -2039,26 +2039,31 @@ def cry_pak_shaders(path, label, out):
                 pos = consumed = 0
                 while (c := raw.find(CTL_MAGIC, pos)) >= 0:
                     pos = c + 4
-                    if (c & 3) or c + 0x760 > len(raw) or any(a <= c < b for a, b in skip): continue
+                    if c + 0x760 > len(raw) or any(a <= c < b for a, b in skip): continue
                     nctl, ncode = struct.unpack_from('<I', raw, c + 0x20)[0], struct.unpack_from('<I', raw, c + 0x704)[0]
                     if not (0x760 <= nctl <= 0x20000 and 0x80 <= ncode <= len(raw) and c + nctl <= len(raw)): continue
                     ctl = raw[c:c + nctl]
-                    cands = [
-                        c + nctl,
-                        (c + nctl + 15) & ~15, (c + nctl + 31) & ~31, (c + nctl + 63) & ~63, (c + nctl + 255) & ~255,
-                    ]
+                    # Prefer offsets carrying an explicit code-area header (GFX_MAGIC / CS_MAGIC) before
+                    # headerless fallbacks so compute shaders preceded by CS_MAGIC are not mispaired with trailing data.
+                    cands = []
+                    if c - ncode >= consumed and raw[c - ncode:c - ncode + 4] in (GFX_MAGIC, CS_MAGIC):
+                        cands.append(c - ncode)
+                    if c + nctl + 4 <= len(raw) and raw[c + nctl:c + nctl + 4] in (GFX_MAGIC, CS_MAGIC):
+                        cands.append(c + nctl)
                     hi = min(len(raw), c + nctl + 0x400)
                     for magic in (GFX_MAGIC, CS_MAGIC):
                         m = raw.find(magic, c + nctl, hi)
                         while m >= 0:
                             cands.append(m); m = raw.find(magic, m + 4, hi)
                     lo = max(consumed, c - ncode - 0x400)
-                    if c - ncode >= consumed: cands.append(c - ncode)
                     for magic in (GFX_MAGIC, CS_MAGIC):
                         m = raw.rfind(magic, lo, c)
                         while m >= 0:
                             cands.append(m); m = raw.rfind(magic, lo, m)
-                    for align_k in ((c - ncode) & ~15, (c - ncode) & ~31, (c - ncode) & ~63):
+                    if c - ncode >= consumed: cands.append(c - ncode)
+                    cands.append(c + nctl)
+                    for align_k in ((c + nctl + 15) & ~15, (c + nctl + 31) & ~31, (c + nctl + 63) & ~63, (c + nctl + 255) & ~255,
+                                    (c - ncode) & ~15, (c - ncode) & ~31, (c - ncode) & ~63):
                         if align_k >= consumed: cands.append(align_k)
                     seen_k = set()
                     for k in cands:
