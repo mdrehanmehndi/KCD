@@ -11,12 +11,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path[:0] = [
+    str(Path(__file__).resolve().parent),
     str(REPO / 'nxnative/dm/android/tools'),
     str(REPO / 'nxnative/dm/gfx/tools'),
     str(REPO / 'nxnative/dm/games'),
 ]
 import android_profile   # noqa: E402
 import game              # noqa: E402
+import host_cc           # noqa: E402
 os.environ.setdefault('DM_GAME', '010021601C496000')
 import shader_split      # noqa: E402
 
@@ -196,6 +198,7 @@ int main(void) {
 
 
 class VirtualBufferInitTest(unittest.TestCase):
+    @unittest.skipUnless(host_cc.posix(), 'a POSIX host C compiler is required (<sys/mman.h>, pthread)')
     def test_virtual_pool_buffer_initialize_reserves_sparse_range_and_guards_null(self):
         cc = shutil.which('cc') or shutil.which('clang')
         if not cc:

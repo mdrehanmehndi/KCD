@@ -10,6 +10,8 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
+import java.security.MessageDigest
+
 // The payload (the environment in one archive, the driver) is built by packaging/android-apk/build_assets.py and
 // staged outside the source tree: it is a few hundred megabytes and not committed. The working tree the build
 // stages the tool's tree in is .cache/assets; what goes into the APK is .cache/apk-assets.
@@ -63,22 +65,20 @@ val copyGameList by tasks.registering(Copy::class) {
 // Built-in game profiles bundled directly into the APK (assets/profiles/<TITLE_ID>/) so KCD works offline out of the box.
 val bundledProfilesAssets = layout.buildDirectory.dir("generated/bundledProfiles")
 val copyBundledProfiles by tasks.registering {
-    val kcdTitleIds = listOf("010021601C496000", "0100650018FE0000")
-    kcdTitleIds.forEach { tid ->
+    val profileSources = listOf("010021601C496000", "0100650018FE0000").mapNotNull { tid ->
         val dir = rootProject.file("../nxnative/dm/games/$tid")
-        if (dir.isDirectory) inputs.dir(dir)
+        if (dir.isDirectory) tid to dir else null
     }
-    outputs.dir(bundledProfilesAssets)
+    profileSources.forEach { (_, dir) -> inputs.dir(dir) }
+    val outRoot = bundledProfilesAssets
+    outputs.dir(outRoot)
     doLast {
-        val root = bundledProfilesAssets.get().asFile
-        val outDir = root.resolve("profiles")
+        val outDir = outRoot.get().asFile.resolve("profiles")
         outDir.deleteRecursively()
         outDir.mkdirs()
         val ids = ArrayList<String>()
-        val md = java.security.MessageDigest.getInstance("SHA-256")
-        for (tid in kcdTitleIds) {
-            val srcDir = rootProject.file("../nxnative/dm/games/$tid")
-            if (!srcDir.isDirectory) continue
+        val md = MessageDigest.getInstance("SHA-256")
+        for ((tid, srcDir) in profileSources) {
             ids.add(tid)
             val dstDir = outDir.resolve(tid)
             dstDir.mkdirs()
@@ -136,7 +136,7 @@ android {
             java.srcDir(revisionSources.get().asFile)
             // The list of the games the porter knows: copied into the assets by the task above
             assets.srcDir(gameListAssets.get().asFile)
-            assets.srcDir(bundledProfilesAssets.get().asFile)
+            assets.directories.add(bundledProfilesAssets.get().asFile.absolutePath)
             // The payload (the environment in one archive, the driver): built by packaging/android-apk/build_assets.py.
             // -PnoPayload leaves it out: a quick build of the app itself, for a phone that already has the
             // environment unpacked (the unpacked tree is in the app's own folder, so it survives the update).
