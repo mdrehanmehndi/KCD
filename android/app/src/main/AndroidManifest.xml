@@ -63,6 +63,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.nx.android.ACTION_DEV_LAUNCH" />
+                <action android:name="com.nx.android.action.DEV_LAUNCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nx2a" android:host="launch" />
+            </intent-filter>
         </activity>
 
         <!-- The port: a foreground service so it goes on while the app is in the background or the screen

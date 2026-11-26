@@ -163,6 +163,7 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
         /** the prepare runs on the process's own scope: an activity recreation does not kill it, and does not re-run it */
         private val prepareScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         private var prepareJob: Job? = null
+        private var devExportJob: Job? = null
 
         // ---- the prepare's states, process-level: the Loading page of whichever instance is current reads these ----
         internal var preparePhase by mutableStateOf(PreparePhase.IDLE); private set
@@ -582,9 +583,9 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
             }
         }
         try { writer?.close() } catch (e: Exception) {}
-        if (PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, false)) {
+        if (PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, true)) {
             val tid = packTitleId ?: LibraryFileScanner.manifestTitleId(pack).orEmpty()
-            runCatching { DevSync.mirrorLogs(pack, tid) }
+            runCatching { DevSync.exportOutputs(applicationContext, pack, tid) }
         }
         // 重建是这局的事：记进那局的档案（玩家问「刚才为什么重编了一遍」时查得到）
         Gamespec.appendEvent(
@@ -648,6 +649,7 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
             return
         }
         hostRunning = true
+        startDevExportLoop()
         // 手柄的显示与浓淡：App 的偏好是唯一真值，宿主只留运行时的副本（settings.txt 不再写这两项）
         runCatching { Native.padPrefs(padView.shown, padView.opacity) }
         // 手柄的映射表：每只手柄的档案推给宿主（老包没有那个入口，推不动就算了）
@@ -1284,6 +1286,8 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     override fun onDestroy() {
         // 这一局没了：助手看到的页面状态回到主界面那一页
+        devExportJob?.cancel()
+        mirrorLogsAsync()
         pageState.setGame(null)
         ctrlListener?.let { runCatching { inputManager.unregisterInputDeviceListener(it) } }
         ctrlListener = null
@@ -1291,12 +1295,26 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
         super.onDestroy()
     }
 
+    private fun startDevExportLoop() {
+        val pack = packPath?.let(::File) ?: return
+        val tid = packTitleId ?: LibraryFileScanner.manifestTitleId(pack) ?: return
+        if (!PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, true)) return
+        devExportJob?.cancel()
+        devExportJob = prepareScope.launch(Dispatchers.IO) {
+            if (!DevSync.hasGameDevDir(tid)) return@launch
+            while (!isDestroyed && !isFinishing) {
+                runCatching { DevSync.exportOutputs(applicationContext, pack, tid) }
+                delay(2500)
+            }
+        }
+    }
+
     private fun mirrorLogsAsync() {
         val pack = packPath?.let(::File) ?: return
         val tid = packTitleId ?: LibraryFileScanner.manifestTitleId(pack) ?: return
-        if (!PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, false)) return
+        if (!PrefsStore(this).bool(PrefsStore.DEV_AUTO_SYNC, true)) return
         prepareScope.launch(Dispatchers.IO) {
-            runCatching { DevSync.mirrorLogs(pack, tid) }
+            runCatching { DevSync.exportOutputs(applicationContext, pack, tid) }
         }
     }
 
@@ -1306,6 +1324,7 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
      * 库页会以为游戏还在跑（点「运行」就会去回到一个已经不在的页面）。
      */
     private fun endProcess() {
+        devExportJob?.cancel()
         mirrorLogsAsync()
         finish()
         Handler(Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, 300)

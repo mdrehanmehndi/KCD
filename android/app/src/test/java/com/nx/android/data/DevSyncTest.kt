@@ -43,7 +43,7 @@ class DevSyncTest {
     }
 
     @Test
-    fun `syncGame pushes pack overrides romfsAt shaders profile runtime and mirrors logs`() {
+    fun `syncGame pulls libdmplay shaders env manifest usercfg and mirrors out bundle`() {
         val root = Files.createTempDirectory("dev-sync-test").toFile()
         try {
             val tidUpper = "010021601C496000"
@@ -53,96 +53,108 @@ class DevSyncTest {
             val runtimes = File(root, "runtimes")
             val runtimeDir = File(runtimes, tidLower).apply { mkdirs() }
             val nxHome = File(root, "nx2a").apply { mkdirs() }
-            val devRoot = File(root, "sdcard_dev")
+            val devRoot = File(root, "nx2a_dev")
             val devDir = File(devRoot, tidLower).apply { mkdirs() }
 
-            // Existing pack files and runtime hooks
+            File(pack, "nx2a-data.json").writeText(
+                """{"title_id":"$tidUpper","name":"KCD","profile_h":"oldhash","romfs_at":"${romfsAt.absolutePath}","player_api_revision":42}"""
+            )
             File(pack, "env.txt").writeText("DM_LANG=en-US\nDM_ROMFS=${romfsAt.absolutePath}\n")
             File(pack, "log.txt").writeText("frame ok\n")
             File(pack, "log.prev.txt").writeText("prev crash\n")
             File(pack, "rebuild.log").writeText("clang ok\n")
+            File(pack, "captured_shaders").mkdirs()
+            File(pack, "captured_shaders/0123456789abcdef.bin").writeText("cap-bin")
             RuntimeStorage.HOOKS.forEach { File(runtimeDir, it).writeText("hook-so") }
 
-            // Staged developer overrides
-            File(devDir, "env.txt").writeText("DM_VK_NAN_SANITIZE=1\n")
-            File(devDir, "settings.txt").writeText("fps=30\n")
-            File(devDir, "RomFS").mkdirs()
-            File(devDir, "RomFS/user.cfg").writeText("r_DynamicResolution = 0\n")
+            // Staged developer overrides directly under nx2a_dev/<lowercase_title_id>/
+            File(devDir, "libdmplay.so").writeText("new-host-elf")
             File(devDir, "shaders.dmsv").writeText("dmsv-v2")
-            File(devDir, "shaders").mkdirs()
-            File(devDir, "shaders/extra.bin").writeText("extra")
-            File(devDir, "shader_map.tsv").writeText("0\t1\n")
-            File(devDir, "runtime").mkdirs()
-            File(devDir, "runtime/libdmplay.so").writeText("new-host-elf")
-
-            val ported = Ported(
-                pack = pack,
-                host = File(pack, "host/libdmplay.so"),
-                icon = null,
-                titleId = tidUpper,
-                name = "KCD",
-                romfsAt = romfsAt.absolutePath,
-                hostDeclared = false,
-                profileH = "abc123",
+            File(devDir, "env.txt").writeText("DM_VK_NAN_SANITIZE=1\n")
+            File(devDir, "nx2a-data.json").writeText(
+                """{"title_id":"$tidUpper","name":"KCD Royal","profile_h":"newhash","romfs_at":"${romfsAt.absolutePath}","player_api_revision":42}"""
             )
+            File(devDir, "user.cfg").writeText("r_DynamicResolution = 0\n")
 
+            val ported = com.nx.android.data.library.LibraryFileScanner.portFromPack(pack, runtimes)!!
             val first = DevSync.syncGame(
                 ported = ported,
                 runtimesDir = runtimes,
                 nxHomeDir = nxHome,
                 devRoot = devRoot,
+                deviceText = "device: test-phone\n",
                 noLsfg = false,
                 playerApiRevision = 42,
             )
 
-            assertEquals(tidUpper, first.titleId)
-            assertEquals(6, first.filesSynced)
-            assertEquals(1, first.runtimeSynced)
-            assertEquals(3, first.logsMirrored)
+            assertEquals(tidLower, first.titleId)
+            assertTrue(first.pulledFiles.containsAll(listOf("nx2a-data.json", "shaders.dmsv", "env.txt", "user.cfg", "libdmplay.so", "build.json")))
+            assertTrue(first.exportedFiles.containsAll(listOf("log.txt", "log.prev.txt", "rebuild.log", "game.txt", "device.txt", "captured_shaders/0123456789abcdef.bin")))
 
-            assertTrue(File(pack, "env.txt").readText().contains("DM_ROMFS=${romfsAt.absolutePath}"))
-            assertTrue(File(pack, "env.txt").readText().contains("DM_VK_NAN_SANITIZE=1"))
-            assertEquals("fps=30\n", File(pack, "settings.txt").readText())
-            assertEquals("r_DynamicResolution = 0\n", File(romfsAt, "user.cfg").readText())
-            assertFalse(File(pack, "RomFS/user.cfg").exists())
-            assertEquals("dmsv-v2", File(pack, "shaders.dmsv").readText())
-            assertEquals("extra", File(pack, "shaders/extra.bin").readText())
-            assertEquals("0\t1\n", File(nxHome, "profiles/$tidUpper/shader_map.tsv").readText())
-            assertEquals("new-host-elf", File(runtimeDir, "libdmplay.so").readText())
+            val copiedHost = File(runtimeDir, "libdmplay.so")
+            assertEquals("new-host-elf", copiedHost.readText())
+            assertTrue(copiedHost.canExecute())
+            assertTrue(copiedHost.canRead())
 
             val marker = com.nx.android.data.library.LibraryFileScanner.readMarker(runtimeDir)
             assertNotNull(marker)
             assertEquals(42, marker!!.playerApiRevision)
-            assertEquals("abc123", marker.profileH)
+            assertEquals("newhash", marker.profileH)
             assertEquals(false, marker.noLsfg)
 
-            assertEquals("frame ok\n", File(devDir, "logs/log.txt").readText())
-            assertEquals("prev crash\n", File(devDir, "logs/log.prev.txt").readText())
-            assertEquals("clang ok\n", File(devDir, "logs/rebuild.log").readText())
+            assertEquals("dmsv-v2", File(pack, "shaders.dmsv").readText())
+            assertTrue(File(pack, "env.txt").readText().contains("DM_ROMFS=${romfsAt.absolutePath}"))
+            assertTrue(File(pack, "env.txt").readText().contains("DM_VK_NAN_SANITIZE=1"))
+            assertEquals("r_DynamicResolution = 0\n", File(romfsAt, "user.cfg").readText())
 
-            // Re-sync with no modifications should be a fast no-op
+            assertEquals("frame ok\n", File(devDir, "out/log.txt").readText())
+            assertEquals("prev crash\n", File(devDir, "out/log.prev.txt").readText())
+            assertEquals("clang ok\n", File(devDir, "out/rebuild.log").readText())
+            assertEquals("device: test-phone\n", File(devDir, "out/device.txt").readText())
+            assertTrue(File(devDir, "out/game.txt").readText().contains("title id: $tidUpper"))
+            assertEquals("cap-bin", File(devDir, "out/captured_shaders/0123456789abcdef.bin").readText())
+
+            // Re-sync with no changes is a clean no-op
+            val refreshed = com.nx.android.data.library.LibraryFileScanner.portFromPack(pack, runtimes)!!
             val second = DevSync.syncGame(
-                ported = ported,
+                ported = refreshed,
                 runtimesDir = runtimes,
                 nxHomeDir = nxHome,
                 devRoot = devRoot,
+                deviceText = "device: test-phone\n",
                 noLsfg = false,
                 playerApiRevision = 42,
             )
-            assertEquals(0, second.filesSynced)
-            assertEquals(0, second.runtimeSynced)
-            assertEquals(0, second.logsMirrored)
+            assertEquals(emptyList<String>(), second.pulledFiles)
+            assertEquals(emptyList<String>(), second.exportedFiles)
         } finally {
             root.deleteRecursively()
         }
     }
 
     @Test
-    fun `stagedTitleIds ignores logs-only directories and orders newest first`() {
+    fun `exportOutputs does nothing when dev directory is absent`() {
+        val root = Files.createTempDirectory("dev-sync-inert").toFile()
+        try {
+            val tid = "010021601C496000"
+            val pack = File(root, "ports/KCD-data").apply { mkdirs() }
+            File(pack, "log.txt").writeText("normal run")
+            val devRoot = File(root, "nx2a_dev").apply { mkdirs() }
+
+            val exported = DevSync.exportOutputs(pack, tid, devRoot = devRoot)
+            assertEquals(emptyList<String>(), exported)
+            assertFalse(File(devRoot, tid.lowercase()).exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `stagedTitleIds ignores out-only directories and orders newest first`() {
         val root = Files.createTempDirectory("dev-staged-ids").toFile()
         try {
-            val logsOnly = File(root, "0100000000000001/logs").apply { mkdirs() }
-            File(logsOnly, "log.txt").writeText("hi")
+            val outOnly = File(root, "0100000000000001/out").apply { mkdirs() }
+            File(outOnly, "log.txt").writeText("hi")
 
             val older = File(root, "0100650018fe0000").apply { mkdirs() }
             val olderFile = File(older, "env.txt").apply { writeText("DM_LOG=1\n") }
@@ -150,16 +162,11 @@ class DevSyncTest {
             older.setLastModified(1_700_000_000_000L)
 
             val newer = File(root, "010021601C496000").apply { mkdirs() }
-            val newerFile = File(newer, "env.txt").apply { writeText("DM_LOG=1\n") }
+            val newerFile = File(newer, "libdmplay.so").apply { writeText("elf") }
             newerFile.setLastModified(1_800_000_000_000L)
             newer.setLastModified(1_800_000_000_000L)
 
-            File(root, "not-a-title-id/env.txt").apply {
-                parentFile!!.mkdirs()
-                writeText("ignored")
-            }
-
-            assertEquals(listOf("010021601C496000", "0100650018FE0000"), DevSync.stagedTitleIds(root))
+            assertEquals(listOf("010021601c496000", "0100650018fe0000"), DevSync.stagedTitleIds(root))
         } finally {
             root.deleteRecursively()
         }

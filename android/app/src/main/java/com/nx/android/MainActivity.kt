@@ -196,8 +196,8 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == GameShortcuts.ACTION) {
             intent.getStringExtra(GameShortcuts.EXTRA_TITLE_ID)?.let { onShortcut(it) }
         }
-        if (intent?.action == DevSync.ACTION_LAUNCH) {
-            handleDevLaunch(intent)
+        if (isDevLaunchIntent(intent)) {
+            handleDevLaunch(intent!!)
         }
         setContent {
             AppRoot(prefs, locale, port, library, onboarding, drivers, environmentSetup, actions,
@@ -293,10 +293,10 @@ class MainActivity : ComponentActivity() {
         // 文件管理器能不能看见 App 的私有目录（运行时、存档、日志）。文档提供器自己读这份设置。
         fileProvider = { prefs.bool(PrefsStore.FILE_PROVIDER, true) },
         onSetFileProvider = { on -> prefs.put(PrefsStore.FILE_PROVIDER, on) },
-        devAutoSync = { prefs.bool(PrefsStore.DEV_AUTO_SYNC, false) },
+        devAutoSync = { prefs.bool(PrefsStore.DEV_AUTO_SYNC, true) },
         onSetDevAutoSync = { on ->
             prefs.put(PrefsStore.DEV_AUTO_SYNC, on)
-            if (on) AppLog.line("dev: Auto-Sync + Direct Launch enabled (${DevSync.defaultDevRoot().absolutePath})")
+            AppLog.line("[dev-sync] ${if (on) "enabled" else "disabled"} (${DevSync.defaultDevRoot().absolutePath})")
         },
         onDevSyncAndLaunch = { triggerDevSyncAndLaunch() },
         onShareBuildLog = { id ->
@@ -464,14 +464,31 @@ class MainActivity : ComponentActivity() {
         return ported.takeIf { it.titleId.equals(titleId, ignoreCase = true) }
     }
 
+    private fun isDevLaunchIntent(intent: Intent?): Boolean {
+        if (intent == null) return false
+        if (intent.action == DevSync.ACTION_LAUNCH || intent.action == DevSync.LEGACY_ACTION_LAUNCH) return true
+        val data = intent.data
+        return intent.action == Intent.ACTION_VIEW && data?.scheme == "nx2a" && data.host == "launch"
+    }
+
+    private fun extractDevTitleId(intent: Intent): String {
+        val fromExtra = intent.getStringExtra(DevSync.EXTRA_TITLE_ID)?.trim().orEmpty()
+        if (fromExtra.isNotEmpty()) return fromExtra
+        val data = intent.data
+        if (data?.scheme == "nx2a" && data.host == "launch") {
+            return data.lastPathSegment?.trim().orEmpty()
+        }
+        return ""
+    }
+
     /**
-     * Termux / shell direct launch (`am start -n com.nx.android/.MainActivity -a com.nx.android.action.DEV_LAUNCH`):
-     * gated behind `PrefsStore.DEV_AUTO_SYNC` (off by default in release builds). Syncs overrides + prebuilt
-     * runtimes from `/sdcard/Download/nx2android/dev/<TITLE_ID>/`, mirrors logs, and launches directly.
+     * Termux / shell direct launch (`am start -a com.nx.android.ACTION_DEV_LAUNCH --es title_id ...`
+     * or `nx2a://launch/<title_id>`). Runs pre-launch sync from `/sdcard/Download/nx2a_dev/<title_id>/`
+     * when All Files Access is granted and starts the game directly into play mode.
      */
     private fun handleDevLaunch(intent: Intent) {
-        if (!prefs.bool(PrefsStore.DEV_AUTO_SYNC, false)) {
-            AppLog.line("[RED] dev: ignored DEV_LAUNCH while Dev Auto-Sync is disabled")
+        if (!prefs.bool(PrefsStore.DEV_AUTO_SYNC, true)) {
+            AppLog.line("[RED] [dev-sync] ignored DEV_LAUNCH while Dev Auto-Sync is disabled")
             toast(locale.str(R.string.dev_sync_disabled_toast))
             return
         }
@@ -481,7 +498,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         val explicitPack = intent.getStringExtra(DevSync.EXTRA_PACK)?.trim().orEmpty()
-        val explicitTitleId = intent.getStringExtra(DevSync.EXTRA_TITLE_ID)?.trim().orEmpty()
+        val explicitTitleId = extractDevTitleId(intent)
         val doSync = intent.getBooleanExtra(DevSync.EXTRA_SYNC, true)
         val rebuild = intent.getBooleanExtra(DevSync.EXTRA_REBUILD, false)
         val doLaunch = intent.getBooleanExtra(DevSync.EXTRA_LAUNCH, true)
@@ -492,7 +509,10 @@ class MainActivity : ComponentActivity() {
                 explicitTitleId.isNotEmpty() -> resolvePortedByMemory(explicitTitleId)
                 else -> null
             }
-            val games = if (fastPorted != null) library.games else awaitLibraryGames()
+            val games = if (fastPorted != null) library.games else {
+                if (!library.scanning && library.games.isEmpty()) library.rescan()
+                awaitLibraryGames()
+            }
             val target = fastPorted?.let { it to it.name.ifBlank { it.titleId } }
                 ?: resolveDevTarget(games, explicitTitleId)
 
@@ -501,13 +521,15 @@ class MainActivity : ComponentActivity() {
                 if (!isTaskRoot) finish()
                 return@launch
             }
-            val (ported, displayName) = target
+            var (ported, displayName) = target
             if (doSync) {
-                val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths) }
-                AppLog.line("dev: sync ${res.titleId} -> files=${res.filesSynced}, runtime=${res.runtimeSynced}, logs=${res.logsMirrored}")
+                val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths, this@MainActivity) }
+                logDevSyncResult(res)
+                ported = LibraryFileScanner.portFromPack(ported.pack, paths.runtimes) ?: ported
+                if (ported.name.isNotBlank()) displayName = ported.name
                 library.rescan()
                 if (!doLaunch) {
-                    toast(locale.str(R.string.dev_sync_done_toast, res.filesSynced, res.runtimeSynced, res.logsMirrored))
+                    toast(locale.str(R.string.dev_sync_done_toast, res.filesSynced, res.logsMirrored))
                     if (!isTaskRoot) finish()
                     return@launch
                 }
@@ -519,8 +541,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun logDevSyncResult(res: DevSync.SyncResult) {
+        if (res.pulledFiles.isNotEmpty()) {
+            val msg = "[dev-sync] synced ${res.titleId}: ${res.pulledFiles.joinToString(", ")}"
+            AppLog.line(msg)
+            android.util.Log.i("nx2a-devsync", msg)
+        }
+        if (res.exportedFiles.isNotEmpty()) {
+            val msg = "[dev-sync] exported ${res.titleId}/out: ${res.exportedFiles.joinToString(", ")}"
+            AppLog.line(msg)
+            android.util.Log.i("nx2a-devsync", msg)
+        }
+    }
+
     private fun triggerDevSyncAndLaunch() {
-        if (!prefs.bool(PrefsStore.DEV_AUTO_SYNC, false)) {
+        if (!prefs.bool(PrefsStore.DEV_AUTO_SYNC, true)) {
             toast(locale.str(R.string.dev_sync_disabled_toast))
             return
         }
@@ -533,20 +568,21 @@ class MainActivity : ComponentActivity() {
             if (!library.scanning && library.games.isEmpty()) library.rescan()
             val games = if (!library.scanning && library.games.isNotEmpty()) library.games else awaitLibraryGames()
             val portedPacks = games.mapNotNull { g -> g.pack?.let { it to g.label } }
-            val (files, runtime, logs) = withContext(Dispatchers.IO) {
-                var f = 0; var r = 0; var l = 0
+            val (pulled, exported) = withContext(Dispatchers.IO) {
+                var pCount = 0; var eCount = 0
                 for ((p, _) in portedPacks) {
-                    val res = DevSync.syncGame(p, paths)
-                    f += res.filesSynced; r += res.runtimeSynced; l += res.logsMirrored
+                    val res = DevSync.syncGame(p, paths, this@MainActivity)
+                    logDevSyncResult(res)
+                    pCount += res.filesSynced; eCount += res.logsMirrored
                 }
-                Triple(f, r, l)
+                pCount to eCount
             }
             library.rescan()
-            AppLog.line("dev: manual sync -> files=$files, runtime=$runtime, logs=$logs")
-            toast(locale.str(R.string.dev_sync_done_toast, files, runtime, logs))
+            toast(locale.str(R.string.dev_sync_done_toast, pulled, exported))
             val target = resolveDevTarget(games, "")
             if (target != null) {
-                runGate(target.first.pack, target.second, alreadySynced = true)
+                val refreshed = LibraryFileScanner.portFromPack(target.first.pack, paths.runtimes) ?: target.first
+                runGate(refreshed.pack, target.second, alreadySynced = true)
             } else if (portedPacks.isEmpty()) {
                 toast(locale.str(R.string.dev_launch_no_target))
             }
@@ -580,20 +616,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (devLaunching) return
-        if (!alreadySynced && prefs.bool(PrefsStore.DEV_AUTO_SYNC, false)) {
-            if (!storageGranted()) {
-                toast(locale.str(R.string.builds_needs_storage))
-                askStorage()
-                return
-            }
+        if (!alreadySynced && prefs.bool(PrefsStore.DEV_AUTO_SYNC, true) &&
+            storageGranted() && DevSync.hasGameDevDir(ported.titleId)) {
             devLaunching = true
             lifecycleScope.launch {
                 try {
-                    val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths) }
-                    if (res.filesSynced > 0 || res.runtimeSynced > 0 || res.logsMirrored > 0) {
-                        AppLog.line("dev: pre-launch sync ${res.titleId} -> files=${res.filesSynced}, runtime=${res.runtimeSynced}, logs=${res.logsMirrored}")
-                    }
-                    startPlayerNow(ported, name, rebuild)
+                    val res = withContext(Dispatchers.IO) { DevSync.syncGame(ported, paths, this@MainActivity) }
+                    logDevSyncResult(res)
+                    val refreshed = LibraryFileScanner.portFromPack(ported.pack, paths.runtimes) ?: ported
+                    startPlayerNow(refreshed, name, rebuild)
                 } finally {
                     devLaunching = false
                 }
@@ -619,10 +650,14 @@ class MainActivity : ComponentActivity() {
         envCheck.refresh()
         // 回到库页：卡片重扫一遍（游戏页的 prepare 会在背后升级包）
         library.rescan()
-        if (prefs.bool(PrefsStore.DEV_AUTO_SYNC, false) && onboarding.storageOk) {
-            val packs = library.games.mapNotNull { it.pack }
+        if (prefs.bool(PrefsStore.DEV_AUTO_SYNC, true) && onboarding.storageOk) {
+            val packs = library.games.mapNotNull { it.pack }.toMutableList()
+            val lastTid = player.currentTitleId()
+            if (lastTid.isNotEmpty() && packs.none { it.titleId.equals(lastTid, ignoreCase = true) }) {
+                resolvePortedByMemory(lastTid)?.let { packs.add(it) }
+            }
             if (packs.isNotEmpty()) {
-                lifecycleScope.launch(Dispatchers.IO) { DevSync.mirrorAllLogs(packs) }
+                lifecycleScope.launch(Dispatchers.IO) { DevSync.exportAllOutputs(this@MainActivity, packs) }
             }
         }
         if (Build.VERSION.SDK_INT >= 30) {
@@ -770,7 +805,7 @@ class MainActivity : ComponentActivity() {
         if (intent.action == GameShortcuts.ACTION) {
             intent.getStringExtra(GameShortcuts.EXTRA_TITLE_ID)?.let { onShortcut(it) }
         }
-        if (intent.action == DevSync.ACTION_LAUNCH) {
+        if (isDevLaunchIntent(intent)) {
             handleDevLaunch(intent)
         }
     }

@@ -36,7 +36,9 @@
 #include <android/looper.h>
 #include <android/native_window.h>
 #include <android/sensor.h>
+#include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <jni.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -162,8 +164,42 @@ static void hold_sync(void) {
 }
 void dm_app_hold(int on) { atomic_store(&g_ui_on, on != 0); hold_sync(); }   // the app's panel is up (the layout editor): the game waits
 static void shake_sensor(int on);   // the accelerometer, off in the background (input, below)
+static void dev_mirror_log(void) {
+    const char *gid = getenv("DM_GAME_ID");
+    if (!g_root[0] || !gid || strlen(gid) != 16) return;
+    char low[20];
+    for (int i = 0; i < 16; i++) low[i] = (char)tolower((unsigned char)gid[i]);
+    low[16] = 0;
+    char devdir[256];
+    snprintf(devdir, sizeof devdir, "/sdcard/Download/nx2a_dev/%s", low);
+    struct stat st;
+    if (stat(devdir, &st) != 0 || !S_ISDIR(st.st_mode)) return;
+    fflush(stderr);
+    char outdir[280], src[700], tmp[320], dst[320];
+    snprintf(outdir, sizeof outdir, "%s/out", devdir);
+    mkdir(outdir, 0755);
+    snprintf(src, sizeof src, "%s/log.txt", g_root);
+    snprintf(tmp, sizeof tmp, "%s/log.txt.part", outdir);
+    snprintf(dst, sizeof dst, "%s/log.txt", outdir);
+    int in = open(src, O_RDONLY);
+    if (in < 0) return;
+    int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out < 0) { close(in); return; }
+    char buf[8192]; ssize_t n;
+    while ((n = read(in, buf, sizeof buf)) > 0) {
+        ssize_t off = 0;
+        while (off < n) {
+            ssize_t w = write(out, buf + off, (size_t)(n - off));
+            if (w <= 0) { close(in); close(out); unlink(tmp); return; }
+            off += w;
+        }
+    }
+    close(in);
+    close(out);
+    if (n == 0) rename(tmp, dst); else unlink(tmp);
+}
 static void go_background(void) { if (!atomic_load(&g_running) || atomic_exchange(&g_bg, 1)) return; dm_focus_set(2); dm_focus_set(3);   // through OutOfFocus, as a game sees HOME and then the suspension
-    hold_sync(); dm_gfx_suspend(1); shake_sensor(0); }
+    hold_sync(); dm_gfx_suspend(1); shake_sensor(0); dev_mirror_log(); }
 static void go_foreground(void) { if (!atomic_load(&g_running) || !atomic_exchange(&g_bg, 0)) return; dm_gfx_suspend(0); hold_sync(); dm_focus_set(2); shake_sensor(1); }
 void dm_perf_gpu_release(void);   // perf_android.c: the GPU's clock control back to its governor (DM_GPU_TURBO)
 void dm_perf_resume(void);        // perf_android.c: restore GPU clock control and ADPF hints on resume
@@ -738,6 +774,7 @@ static void *host_thread(void *a) {
     atomic_store(&g_running, 1);
     int rc = main(2, argv);
     LOG("host returned %d", rc);
+    dev_mirror_log();
     dm_perf_gpu_release();   // the game ended itself: the device-wide KGSL property outlives the process (perf_android.c)
     _exit(rc);
 }

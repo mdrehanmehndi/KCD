@@ -862,11 +862,11 @@
     <string name="agent_panel_expand">Open the full chat</string>
     <string name="set_dev_section">Developer / Termux</string>
     <string name="set_dev_sync_title">Dev Auto-Sync + Direct Launch</string>
-    <string name="set_dev_sync_note">Auto-syncs env.txt, RomFS/user.cfg, shaders, and prebuilt .so binaries from %1$s before launch, mirrors game logs back to logs/, and enables Termux am start direct launch.</string>
+    <string name="set_dev_sync_note">Auto-syncs libdmplay.so, shaders.dmsv, env.txt, nx2a-data.json, and user.cfg from %1$s/&lt;title_id&gt;/ before launch, exports logs &amp; captured_shaders to out/, and enables Termux am start / nx2a://launch direct launch.</string>
     <string name="set_dev_sync_launch_title">Sync staged files &amp; launch</string>
     <string name="set_dev_sync_launch_label">Sync &amp; Launch</string>
-    <string name="set_dev_sync_launch_note">Pulls overrides from shared storage, mirrors logs, and starts the staged game.</string>
+    <string name="set_dev_sync_launch_note">Pulls overrides from nx2a_dev, mirrors out/ logs, and starts the staged game.</string>
     <string name="dev_sync_disabled_toast">Enable Dev Auto-Sync + Direct Launch in Settings (About) first</string>
     <string name="dev_launch_no_target">No matching ported game found to launch</string>
-    <string name="dev_sync_done_toast">Dev sync done: %1$d file(s), %2$d runtime(s), %3$d log(s)</string>
+    <string name="dev_sync_done_toast">Dev sync done: %1$d pulled, %2$d exported</string>
 </resources>

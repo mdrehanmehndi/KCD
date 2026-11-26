@@ -69,7 +69,7 @@ class PrefsStore @Inject constructor(@ApplicationContext ctx: Context) {
         const val FILE_PROVIDER = "file.provider"
         // the assistant's in-game entry: the slim handle on the game screen's right edge (on by default)
         const val AGENT_BADGE = "agent.badge"
-        // developer fast-iteration auto-sync + direct launch from shared storage (off by default)
+        // developer fast-iteration auto-sync + direct launch when nx2a_dev/<title_id>/ exists (on by default; inert without that folder)
         const val DEV_AUTO_SYNC = "dev.autoSync"
     }
 
