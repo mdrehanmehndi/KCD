@@ -123,6 +123,16 @@ void dm_perf_resume(void) {
     atomic_store(&g_perf_resumed, 1);
     if (dm_pacing_turbo() == 1) gpu_turbo();
 }
+static int perf_resume_tick(int64_t p) {
+    if (!atomic_exchange(&g_perf_resumed, 0)) return 0;
+    gpu_turbo();
+    if (g_hint) {
+        if (H.update) H.update(g_hint, p);
+        if (H.set_threads && g_hint_n > 0) H.set_threads(g_hint, g_hint_tids, (size_t)g_hint_n);
+        if (H.increase) H.increase(g_hint, true, true, "app resumed");
+    }
+    return 1;
+}
 
 static void hint_init(int64_t target) {
     static int tried; if (tried) return; tried = 1;
@@ -427,15 +437,8 @@ void dm_perf_frame(double period) {
     // and the work then never shows the room to step back up (NEO stayed at 30 fps with frames of 31 to 48 ms)
     if (g_game_period && (int64_t)g_game_period < p) p = (int64_t)g_game_period;
     hint_init(p);
-    if (atomic_exchange(&g_perf_resumed, 0)) {
-        g_work_start = 0; g_prev_present = 0;
-        gpu_turbo();
-        if (g_hint) {
-            if (H.update) H.update(g_hint, p);
-            if (H.set_threads && g_hint_n > 0) H.set_threads(g_hint, g_hint_tids, (size_t)g_hint_n);
-            if (H.increase) H.increase(g_hint, true, true, "app resumed");
-        }
-    } else { static unsigned n; if (++n % 60 == 0) gpu_turbo(); }
+    if (perf_resume_tick(p)) { g_work_start = 0; g_prev_present = 0; }
+    else { static unsigned n; if (++n % 60 == 0) gpu_turbo(); }
     if (g_work_start) {   // (a longer span: the game was held, by the pause menu or the background)
         int64_t w = g_prev_present ? t - g_prev_present - g_pace : t - g_work_start;
         int64_t pq = g_prev_present ? g_pq : 0, pace = dm_perf_pq_pace(pq);   // (t - g_work_start starts after the wait already)

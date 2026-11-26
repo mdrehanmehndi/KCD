@@ -48,7 +48,7 @@ static void capture_red(const char *fmt, ...) {
         code += between(header, 'typedef struct __attribute__((packed)) { uint8_t kind, desc, dim, flags;', '_Static_assert(sizeof(dmsv_bind)')
         code += r'''
 static struct { VkDevice dev; VkPhysicalDevice pd; } V;
-static uint64_t g_wseq, g_tex_gen=1, g_set_epoch=1, g_x_logfs;
+static uint64_t g_tex_gen=1, g_set_epoch=1, g_x_logfs;
 static int g_var_now, g_tracing;
 static struct { struct { uint64_t key; } *sh[2]; } S;
 static vkimg_t image;
@@ -62,6 +62,7 @@ static const vkfmt_t format = {.vk=VK_FORMAT_R8G8B8A8_UNORM, .kind=1, .bpb=4};
 static const vkfmt_t *vk_fmt(int f) { (void)f; return &format; }
 static vkimg_t *vk_tex(const tex_t *t) { (void)t; return &image; }
 static void alias_check(vkimg_t *im) { (void)im; }
+static void vk_tex_wrote(vkimg_t *im) { (void)im; }
 // gfx_vk.h declares this; vk_tex_view calls it before its definition
 VkImageView vk_tex_view_as(const tex_t *t, const view_t *vw, int dim, int arrayed, int as_attachment, vkimg_t **img_out, VkFormat vfmt);
 static void vk_watch(const vkimg_t *im, const char *s) { (void)im; (void)s; }

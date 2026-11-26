@@ -85,6 +85,7 @@ static void vkCmdClearDepthStencilImage(VkCommandBuffer cb,VkImage im,VkImageLay
 static int vk_buf_at(uint64_t a,uint64_t n,VkBuffer *b,VkDeviceSize *o) {(void)a;(void)n;(void)b;(void)o;abort();}
 static void vk_readback_unknown(void) {abort();}
 void vk_gpu_wrote(uint64_t a,uint64_t n) {(void)a;(void)n;abort();}
+static void vk_tex_wrote(vkimg_t *im) {(void)im;}
 static void vkCmdCopyImageToBuffer(VkCommandBuffer cb,VkImage im,VkImageLayout l,VkBuffer b,uint32_t n,const VkBufferImageCopy *r) {(void)cb;(void)im;(void)l;(void)b;(void)n;(void)r;abort();}
 /* FUNCTIONS */
 static p_copy_t2t setup(int fmt,VkFormat sf,VkFormat df) {

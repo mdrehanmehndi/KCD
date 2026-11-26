@@ -31,6 +31,7 @@ static struct {
 static int64_t perf_now(void) { return now; }
 static void hint_init(int64_t period) { assert(period == 16666667); }
 static void gpu_turbo(void) {}
+static int perf_resume_tick(int64_t p) { (void)p; return 0; }
 static void hint_threads_scan(int32_t tid) { (void)tid; }
 static int32_t gettid(void) { return 1; }
 static void adapt_frame(int64_t work, int64_t time) { (void)time; observed_work = work; }
