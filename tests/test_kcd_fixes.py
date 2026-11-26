@@ -195,5 +195,98 @@ int main(void) {
             self.assertEqual(run.returncode, 0, run.stderr)
 
 
+class VirtualBufferInitTest(unittest.TestCase):
+    def test_virtual_pool_buffer_initialize_reserves_sparse_range_and_guards_null(self):
+        cc = shutil.which('cc') or shutil.which('clang')
+        if not cc:
+            self.skipTest('no C compiler available')
+        nvn_dir = REPO / 'nxnative/dm/gfx/nvn'
+        src = (nvn_dir / 'hle_nvn.c').read_text(encoding='utf-8')
+        vpool_start = src.index('enum { NVRUN = 1024, VPT_LEAF = 512 };')
+        vpool_end = src.index('static void vpool_drop(', vpool_start)
+        vpool_code = src[vpool_start:vpool_end]
+        buf_start = src.index('typedef struct { NVNdevice *dev; const pool_t *pool;')
+        buf_end = src.index('NVN(nvnBufferGetSize,', buf_start)
+        buf_code = src[buf_start:buf_end]
+        obj = (nvn_dir / 'nvn_obj.h').read_text(encoding='utf-8')
+        pool_types = '\n'.join(
+            line for line in obj.splitlines()
+            if any('} ' + name + ';' in line for name in ('pool_builder_t', 'pool_t'))
+        )
+
+        harness = r'''
+#define _GNU_SOURCE
+#include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include "nvn_protos.h"
+#define MAGIC(a,b,c,d) ((uint32_t)(a)|(uint32_t)(b)<<8|(uint32_t)(c)<<16|(uint32_t)(d)<<24)
+#define FITS(T,H) _Static_assert(sizeof(T)<=sizeof(H), "object exceeds NVN ABI")
+#define LOG(...) ((void)0)
+#define OLOG(...) ((void)0)
+#define DM_GAME_APP_POOL 0xCD500000ULL
+#define DM_GAME_SMALL_VPOOL_SPARSE 0
+#define NVN(name,ret,...) static ret h_##name(__VA_ARGS__); static NVNT_##name entry_##name=h_##name; static ret h_##name(__VA_ARGS__)
+''' + pool_types + '''
+static uint8_t *vpool_reserve(pool_t *o);
+static uint8_t *vpool_reserve_mode(pool_t *o, int force_sparse);
+''' + buf_code + '\n' + vpool_code + r'''
+int main(void) {
+    /* 1. Unmapped 64 MB VIRTUAL pool even when small_vpool_sparse=0 must reserve on demand in BufferInitialize */
+    NVNmemoryPool np = {0};
+    pool_t *p = (pool_t *)&np;
+    p->magic = MAGIC('P', 'O', 'O', 'L');
+    p->flags = 0x221;
+    p->size = 0x4000000ULL;
+    p->mem = NULL; p->vp = NULL; p->vmode = 0;
+
+    NVNbufferBuilder bb = {0};
+    NVNbuffer buf = {0};
+    entry_nvnBufferBuilderSetDefaults(&bb);
+    entry_nvnBufferBuilderSetStorage(&bb, &np, 0x1000, 0x20000);
+    assert(entry_nvnBufferInitialize(&buf, &bb) == 1);
+    assert(p->mem != NULL && p->vp != NULL && p->vmode == 2);
+    assert(entry_nvnBufferGetAddress(&buf) == (NVNbufferAddress)(p->mem + 0x1000));
+    assert(entry_nvnBufferMap(&buf) == p->mem + 0x1000);
+
+    /* 2. Non-virtual pool with no storage fails BufferInitialize cleanly and GetAddress/Map do not dereference NULL+0x8 */
+    NVNmemoryPool badp = {0};
+    pool_t *bp = (pool_t *)&badp;
+    bp->magic = MAGIC('P', 'O', 'O', 'L');
+    bp->flags = 0x21;
+    bp->size = 0x10000;
+    NVNbuffer badbuf = {0};
+    entry_nvnBufferBuilderSetStorage(&bb, &badp, 0, 0x1000);
+    assert(entry_nvnBufferInitialize(&badbuf, &bb) == 0);
+    assert(entry_nvnBufferGetAddress(&badbuf) == 0);
+    assert(entry_nvnBufferMap(&badbuf) == NULL);
+    assert(entry_nvnBufferGetAddress(NULL) == 0);
+    assert(entry_nvnBufferMap(NULL) == NULL);
+
+    munmap(p->vp->base, p->vp->len);
+    free(p->vp->pt); free(p->vp); free(g_vp);
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as td:
+            c = Path(td) / 'test_vbuf.c'
+            exe = Path(td) / 'test_vbuf'
+            c.write_text(harness, encoding='utf-8')
+            comp = subprocess.run(
+                [cc, '-std=gnu11', '-O2', '-I' + str(nvn_dir), '-I' + str(nvn_dir / 'include'), str(c), '-o', str(exe), '-lpthread'],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(comp.returncode, 0, comp.stderr)
+            run = subprocess.run([str(exe)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

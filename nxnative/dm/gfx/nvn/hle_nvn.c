@@ -211,7 +211,7 @@ NVN(nvnMemoryPoolBuilderSetDefaults, void, NVNmemoryPoolBuilder *b) { memset(b, 
 NVN(nvnMemoryPoolBuilderSetDevice, void, NVNmemoryPoolBuilder *b, NVNdevice *d) { ((pool_builder_t *)b)->dev = d; }
 NVN(nvnMemoryPoolBuilderSetStorage, void, NVNmemoryPoolBuilder *b, void *m, size_t n) { ((pool_builder_t *)b)->mem = m; ((pool_builder_t *)b)->size = n; }
 NVN(nvnMemoryPoolBuilderSetFlags, void, NVNmemoryPoolBuilder *b, int f) { ((pool_builder_t *)b)->flags = f; }
-static uint8_t *vpool_reserve(pool_t *o); static void vpool_release(pool_t *o);   // sparse virtual pools, see MapVirtual
+static uint8_t *vpool_reserve(pool_t *o); static uint8_t *vpool_reserve_mode(pool_t *o, int force_sparse); static void vpool_release(pool_t *o);   // sparse virtual pools, see MapVirtual
 static void replay_lock(void); static void replay_unlock(void);   // the replay's state, from a game thread (see "Asynchronous replay")
 static void nvn_drain(void); static int job_wait(uint64_t id, uint64_t timeout_ns); static int nvn_async(void); static int nvn_jobs_wait_queued(uint64_t timeout_ns);   // asynchronous replay (see below)
 __attribute__((weak)) void vk_pool_set_flags(const void *mem, int flags) { (void)mem; (void)flags; }
@@ -2222,6 +2222,9 @@ NVN(nvnBufferBuilderSetDevice, void, NVNbufferBuilder *b, NVNdevice *d) { BB(b)-
 NVN(nvnBufferBuilderSetStorage, void, NVNbufferBuilder *b, NVNmemoryPool *p, ptrdiff_t off, size_t n) { BB(b)->pool = (const pool_t *)p; BB(b)->off = off; BB(b)->size = n; }
 NVN(nvnBufferInitialize, NVNboolean, NVNbuffer *buf, const NVNbufferBuilder *b) {
     const buf_builder_t *bb = (const buf_builder_t *)b;
+    if (bb->pool && bb->pool->magic == MAGIC('P', 'O', 'O', 'L') && (bb->pool->flags & 0x200) &&
+        (!bb->pool->mem || (bb->pool->vp && !bb->pool->vmode)))
+        (void)vpool_reserve_mode((pool_t *)bb->pool, 1);
     if (!bb->pool || !bb->pool->mem) { LOG("[RED] BufferInitialize: pool has no storage (pool %p flags %#x offset %#llx size %#llx)", (const void *)bb->pool, bb->pool ? bb->pool->flags : 0, (unsigned long long)bb->off, (unsigned long long)bb->size); return 0; }
     if ((uint64_t)bb->off + bb->size > bb->pool->size) LOG("[RED] BufferInitialize: past the end of the pool (offset %#llx size %#llx pool %#llx)", (unsigned long long)bb->off, (unsigned long long)bb->size, (unsigned long long)bb->pool->size);
     *(buf_t *)buf = (buf_t){MAGIC('B', 'U', 'F', 0), bb->pool, bb->off, bb->size};
@@ -2230,8 +2233,14 @@ NVN(nvnBufferInitialize, NVNboolean, NVNbuffer *buf, const NVNbufferBuilder *b) 
 }
 NVN(nvnBufferFinalize, void, NVNbuffer *buf) { ((buf_t *)buf)->magic = 0; }
 NVN(nvnBufferSetDebugLabel, void, NVNbuffer *buf, const char *s) { (void)buf; (void)s; }
-NVN(nvnBufferGetAddress, NVNbufferAddress, const NVNbuffer *buf) { return (NVNbufferAddress)(BF(buf)->pool->mem + BF(buf)->off); }
-NVN(nvnBufferMap, void *, const NVNbuffer *buf) { return BF(buf)->pool->mem + BF(buf)->off; }
+NVN(nvnBufferGetAddress, NVNbufferAddress, const NVNbuffer *buf) {
+    if (!buf || BF(buf)->magic != MAGIC('B', 'U', 'F', 0) || !BF(buf)->pool || !BF(buf)->pool->mem) return 0;
+    return (NVNbufferAddress)(BF(buf)->pool->mem + BF(buf)->off);
+}
+NVN(nvnBufferMap, void *, const NVNbuffer *buf) {
+    if (!buf || BF(buf)->magic != MAGIC('B', 'U', 'F', 0) || !BF(buf)->pool || !BF(buf)->pool->mem) return NULL;
+    return BF(buf)->pool->mem + BF(buf)->off;
+}
 NVN(nvnBufferGetSize, size_t, const NVNbuffer *buf) { return (size_t)BF(buf)->size; }
 NVN(nvnBufferGetMemoryPool, NVNmemoryPool *, const NVNbuffer *buf) { return (NVNmemoryPool *)BF(buf)->pool; }
 NVN(nvnBufferGetMemoryOffset, ptrdiff_t, const NVNbuffer *buf) { return (ptrdiff_t)BF(buf)->off; }
@@ -2282,11 +2291,22 @@ static pthread_mutex_t g_vp_mu = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic uint64_t g_vp_gen;   // bumped per mapping request
 static int vpool_any(void) { return atomic_load_explicit(&g_vp_count, memory_order_acquire) != 0; }
 static struct vpool *vpool_of(const pool_t *o) { return o->vp; }
-static uint8_t *vpool_reserve(pool_t *o) {   // → the reserved range, or NULL (the pool takes the alias path of MapVirtual)
+static uint8_t *vpool_reserve_mode(pool_t *o, int force_sparse) {   // → the reserved range, or NULL (the pool takes the alias path of MapVirtual)
     if (!(o->flags & 0x200)) return NULL;
-    // A pool no larger than the application pool keeps main's alias unless the profile asks (small_vpool_sparse on: OCTOPATH TRAVELER's per-texture pools); a game that maps
-    // a small pool in parts the alias accepts would otherwise become page-table-only on Android
-    if (o->size <= DM_GAME_APP_POOL && !DM_GAME_SMALL_VPOOL_SPARSE) return NULL;
+    // A pool no larger than the application pool keeps main's alias unless the profile asks (small_vpool_sparse on: OCTOPATH TRAVELER's per-texture pools) or a buffer binds before MapVirtual;
+    // a game that maps a small pool in parts the alias accepts would otherwise become page-table-only on Android
+    if (!force_sparse && o->size <= DM_GAME_APP_POOL && !DM_GAME_SMALL_VPOOL_SPARSE) return NULL;
+    if (force_sparse) {
+        pthread_mutex_lock(&g_vp_mu);
+        if (o->mem || o->vp) {
+            if (o->vp && !o->vmode) o->vmode = 2;
+            uint8_t *m = o->mem ? o->mem : o->vp->base;
+            if (!o->mem) o->mem = m;
+            pthread_mutex_unlock(&g_vp_mu);
+            return m;
+        }
+        pthread_mutex_unlock(&g_vp_mu);
+    }
 #if TARGET_OS_IPHONE   // 1 GB: Monster Hunter Rise's buffers stay under 0x20100000 through its opening, its textures (32 GB in) are read through the page table, and 4 GB guest + 1 GB stays near the 5 GB proven on a phone
     uint64_t len = o->size < (1ull << 30) ? o->size : 1ull << 30;
 #else
@@ -2303,17 +2323,26 @@ static uint8_t *vpool_reserve(pool_t *o) {   // → the reserved range, or NULL 
     }
     v->pool = o; v->base = a; v->len = len; v->size = o->size;
     pthread_mutex_lock(&g_vp_mu);
+    if (o->mem || o->vp) {
+        if (force_sparse && o->vp && !o->vmode) o->vmode = 2;
+        uint8_t *m = o->mem ? o->mem : o->vp->base;
+        if (!o->mem) o->mem = m;
+        pthread_mutex_unlock(&g_vp_mu);
+        munmap(a, len); free(v->pt); free(v);
+        return m;
+    }
     if (g_nvp == g_cvp) {
         int nc = g_cvp ? 2 * g_cvp : 64; struct vpool **t = realloc(g_vp, nc * sizeof *g_vp);
         if (!t) { pthread_mutex_unlock(&g_vp_mu); LOG("[RED] virtual pool %p: no memory for the pool table (%d pools): it keeps the alias", (const void *)o, g_nvp); munmap(a, len); free(v->pt); free(v); return NULL; }
         g_vp = t; g_cvp = nc;
     }
-    g_vp[g_nvp++] = v; o->vp = v; atomic_fetch_add_explicit(&g_vp_count, 1, memory_order_release);
-    o->vmode = o->size > DM_GAME_APP_POOL ? 2 : 0;
+    g_vp[g_nvp++] = v; o->vp = v; o->mem = a; atomic_fetch_add_explicit(&g_vp_count, 1, memory_order_release);
+    o->vmode = (force_sparse || o->size > DM_GAME_APP_POOL) ? 2 : 0;
     pthread_mutex_unlock(&g_vp_mu);
     if (o->vmode == 2) LOG("[nvn] virtual pool %p (%#llx bytes, flags %#x): sparse, own address range %p+%#llx, physical pages are remapped into it", (const void *)o, (unsigned long long)o->size, o->flags, a, (unsigned long long)len);
     return a;
 }
+static uint8_t *vpool_reserve(pool_t *o) { return vpool_reserve_mode(o, 0); }
 static void vpool_drop(pool_t *o) {   // caller holds the replay lock and g_vp_mu
     struct vpool *v = o->vp; if (!v) return;
     for (int k = 0; k < v->nrun; k++) mtl_pool_del(v->base + v->run[k].lo);
