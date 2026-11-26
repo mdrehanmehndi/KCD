@@ -17,7 +17,7 @@ import java.io.File
  *  - Pre-launch sync pulls updated `libdmplay.so` (with +rx permissions and `build.json` refresh so no rebuild
  *    is demanded), `shaders.dmsv`, `env.txt`, `nx2a-data.json`, and `user.cfg` (or `RomFS/`).
  *  - Live / pause / exit / crash export mirrors `log.txt`, `log.prev.txt`, `device.txt`, `game.txt`,
- *    `rebuild.log`, and any `captured_shaders/*.bin` out to `<dev_dir>/out/` for Termux inspection.
+ *    `rebuild.log`, and any `.bin` files under `captured_shaders/` out to `<dev_dir>/out/` for Termux inspection.
  */
 object DevSync {
 
@@ -250,7 +250,7 @@ object DevSync {
     }
 
     /**
-     * Mirrors `log.txt`, `log.prev.txt`, `rebuild.log`, `device.txt`, `game.txt`, and `captured_shaders/*.bin`
+     * Mirrors `log.txt`, `log.prev.txt`, `rebuild.log`, `device.txt`, `game.txt`, and `.bin` files under `captured_shaders/`
      * into `/sdcard/Download/nx2a_dev/<lowercase_title_id>/out/`, ONLY if the dev folder already exists.
      */
     fun exportOutputs(
