@@ -10,7 +10,7 @@
 
 | 🎮 **已移植游戏** | 🗂️ **游戏画廊** | 🤖 **内置AI助手** | 📚 **移植文档** |
 |:---:|:---:|:---:|:---:|
-| **<!-- count:ported -->82 / 195<!-- /count -->**<br><!-- count:playable -->67<!-- /count --> 款可玩 · <!-- count:experimental -->8<!-- /count --> 款实验 · <!-- count:wip -->4<!-- /count --> 款进行中 · <!-- count:boots -->3<!-- /count --> 款能启动<br>[看清单](docs/PORT_CHECKLIST.md) | **<!-- count:gallery -->74<!-- /count -->** 款收录<br>[看画廊](#游戏列表) | 跑在手机自己身上<br>[看助手](#内置ai助手) | 从 dump 到 PR 的完整路径<br>[看指南](docs/PORTING_GUIDE.md) |
+| **<!-- count:ported -->84 / 197<!-- /count -->**<br><!-- count:playable -->67<!-- /count --> 款可玩 · <!-- count:experimental -->9<!-- /count --> 款实验 · <!-- count:wip -->5<!-- /count --> 款进行中 · <!-- count:boots -->3<!-- /count --> 款能启动<br>[看清单](docs/PORT_CHECKLIST.md) | **<!-- count:gallery -->74<!-- /count -->** 款收录<br>[看画廊](#游戏列表) | 跑在手机自己身上<br>[看助手](#内置ai助手) | 从 dump 到 PR 的完整路径<br>[看指南](docs/PORTING_GUIDE.md) |
 
 把你的 Switch 游戏原生移植到安卓手机上：游戏自己的 arm64 代码在设备上直接跑，Switch 的系统服务由一个宿主程序顶替，NVN 图形调用重放到 Vulkan 上。选好游戏文件，点 **移植**，得到游戏的数据包，手机上的 nx2androidX App 负责运行它。
 

@@ -157,7 +157,14 @@ static NVNformat texture_backing_format(NVNformat format) {
             return NVN_FORMAT_RGBA8;
         case NVN_FORMAT_BGRX8: case NVN_FORMAT_BGRX8_SRGB: case NVN_FORMAT_BGRA8_SRGB:
             return NVN_FORMAT_BGRA8;
-        default: return format;
+        case 0x45: return (NVNformat)0x41;   // BC1_RGB_SRGB -> BC1_RGB
+        case 0x46: return (NVNformat)0x42;   // BC1_RGBA_SRGB -> BC1_RGBA
+        case 0x47: return (NVNformat)0x43;   // BC2_SRGB -> BC2
+        case 0x48: return (NVNformat)0x44;   // BC3_SRGB -> BC3
+        case 0x4e: return (NVNformat)0x4d;   // BC7_SRGB -> BC7
+        default:
+            if (format >= 0x87 && format <= 0x94) return (NVNformat)(format - 14);   // ASTC *_SRGB -> UNORM
+            return format;
     }
 }
 typedef struct { uint64_t pool; int64_t off; nvn_texdesc d; uint8_t family; } akey;
@@ -173,7 +180,12 @@ static unsigned texture_family_bit(NVNformat format) {
     case NVN_FORMAT_RGBA8_SRGB: case NVN_FORMAT_BGRA8_SRGB: return 2;
     case NVN_FORMAT_RGBX8: case NVN_FORMAT_BGRX8: return 4;
     case NVN_FORMAT_RGBX8_SRGB: case NVN_FORMAT_BGRX8_SRGB: return 8;
-    default: return 0;
+    case 0x41: case 0x42: case 0x43: case 0x44: case 0x4d: return 1;
+    case 0x45: case 0x46: case 0x47: case 0x48: case 0x4e: return 2;
+    default:
+        if (format >= 0x79 && format <= 0x86) return 1;
+        if (format >= 0x87 && format <= 0x94) return 2;
+        return 0;
     }
 }
 // g_img_mu held. On a miss, k selects the sole owning key of the new image.
@@ -366,6 +378,17 @@ static void vk_tex_view_drop_all(vkimg_t *im);
 // one over its memory rendered, here it does not. They are linked both ways at creation (up to 8 each), and a sampled image older than an overlapping
 // image's last rendering is logged ([alias] stale read), to find what a game reinterprets
 static uint64_t g_wseq;
+void vk_tex_wrote(vkimg_t *im) {
+    if (!im) return;
+    im->wseq = ++g_wseq; im->gpu_w = 1;
+    if (im->packaged && !im->pkg_sparse && !im->pkg_released && im->pkg_mem && im->pkg_len &&
+        nvn_dirty_since_span(im->pkg_span, im->pkg_mem, im->pkg_len, im->pkg_stamp)) {
+        im->pkg_hash = pkg_hash((const uint8_t *)im->pkg_mem, im->pkg_len);
+        nvn_dirty_protect(im->pkg_mem, im->pkg_len);
+        im->pkg_stamp = nvn_dirty_now();
+        im->pkg_seen = im->pkg_stamp;
+    }
+}
 static void alias_link(vkimg_t *im) {
     for (uint32_t i = 0; i < g_by_key.cap; i++) {
         vkimg_t *o = g_by_key.vals[i]; if (!o || o == im || o->pool != im->pool || o->off >= im->off + im->size || im->off >= o->off + o->size) continue;
@@ -688,7 +711,7 @@ static int bc_standin_ok(const vkimg_t *im, const vkfmt_t *cf, const vkfmt_t *vf
 VkImageView vk_tex_view_as(const tex_t *t, const view_t *vw, int dim, int arrayed, int as_attachment, vkimg_t **img_out, VkFormat vfmt) {
     vkimg_t *im = vk_tex(t); if (img_out) *img_out = im;
     if (!im) return VK_NULL_HANDLE;
-    if (as_attachment) { im->wseq = ++g_wseq; im->gpu_w = 1; } else if (im->novl) alias_check(im);
+    if (as_attachment) vk_tex_wrote(im); else if (im->novl) alias_check(im);
     vk_watch(im, as_attachment ? "attachment" : "sampled or image");
     if (!as_attachment) { void vk_texdump_note(vkimg_t *im); vk_texdump_note(im); }
     const vkfmt_t *f = vk_fmt(vw && vw->set_format ? vw->format : t->d.format); if (!f) f = vk_fmt(t->d.format);

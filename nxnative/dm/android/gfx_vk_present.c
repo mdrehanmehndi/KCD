@@ -189,7 +189,7 @@ static int swap_make(void) {
     g_next = g_pre == VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ? g_sext : (VkExtent2D){g_sext.height, g_sext.width};
     VkSwapchainCreateInfoKHR ci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, NULL, 0, g_surf, n, g_sfmt, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, g_next, 1,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, NULL, g_pre,
-        (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) ? VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_PRESENT_MODE_FIFO_KHR, 1, VK_NULL_HANDLE};
+        (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR, VK_PRESENT_MODE_FIFO_KHR, 1, VK_NULL_HANDLE};
     VkResult r = vkCreateSwapchainKHR(V.dev, &ci, NULL, &g_swap);
     if (r) { VKLOG("[RED] swapchain creation failed: %d", r); swap_destroy(); return 0; }
     g_nsimg = 8; vkGetSwapchainImagesKHR(V.dev, g_swap, &g_nsimg, g_simg);
@@ -991,7 +991,11 @@ static uint64_t pace_desired(double period) {   // the frame's desired present t
 // the game's own rate. with_meta: the game frame's extras (the sRGB pick on the first
 // present, the picture-rect report for the touch mapping); a generated frame follows what it chose, and never
 // flips (the chain was fed the texture already upright). period < 0: a redraw (ticket 0).
-static VkFormat im_meta_srgb;   // the game frame's sRGB pick: a generated frame follows it (present_window sets it)
+static VkFormat im_meta_srgb;   // the game frame's sRGB pick: a generated frame follows it
+static VkFormat meta_srgb_of(const vkimg_t *im) {
+    return im->fmt == VK_FORMAT_R8G8B8A8_SRGB || im->fmt == VK_FORMAT_B8G8R8A8_SRGB || im->fmt == VK_FORMAT_A8B8G8R8_SRGB_PACK32
+        ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+}
 static void present_one(vkimg_t *im, VkImage src, int cx, int cy, int cw, int ch, int flip, double period, uint64_t ticket, int with_meta) {
     // The performance HUD's counters: the game's frame (a redraw presents the last one again — not a frame) and the generation's frames
     hud_count(with_meta, period, mono_ns());
@@ -1000,7 +1004,7 @@ static void present_one(vkimg_t *im, VkImage src, int cx, int cy, int cw, int ch
     // 30 ms at most and give the frame up; the next redraw, 33 ms on, tries again with the newest state. Game frames still wait without a bound
     uint64_t wt = period < 0 ? 30000000ull : UINT64_MAX;
     if (vkWaitForFences(V.dev, 1, &g_pfence[k], 1, wt) == VK_TIMEOUT) return;
-    if (with_meta && im_meta_srgb != g_want) { g_want = im_meta_srgb; swap_destroy(); if (!swap_make()) return; }   // once, at the first present of the other kind
+    if (with_meta && im_meta_srgb && im_meta_srgb != g_want) { g_want = im_meta_srgb; swap_destroy(); if (!swap_make()) return; }   // once, at the first present of the other kind
     uint32_t idx; VkResult r = vkAcquireNextImageKHR(V.dev, g_swap, wt, g_acq[k], VK_NULL_HANDLE, &idx);
     if (r == VK_TIMEOUT) return;   // (a redraw that could not get an image in time: the next one presents this state)
     if (r == VK_ERROR_OUT_OF_DATE_KHR) { swap_destroy(); if (!swap_make()) return; r = vkAcquireNextImageKHR(V.dev, g_swap, UINT64_MAX, g_acq[k], VK_NULL_HANDLE, &idx); }
@@ -1082,7 +1086,7 @@ static void present_one(vkimg_t *im, VkImage src, int cx, int cy, int cw, int ch
 }
 static void present_window(vkimg_t *im, const int crop[4], double period, uint64_t ticket) {   // period: the game's frame period (s); < 0 for a redraw (ticket 0)
     int cx = crop ? crop[0] : 0, cy = crop ? crop[1] : 0, cw = crop && crop[2] ? crop[2] : (int)im->w, ch = crop && crop[3] ? crop[3] : (int)im->h;
-    im_meta_srgb = im->fmt == VK_FORMAT_R8G8B8A8_SRGB || im->fmt == VK_FORMAT_B8G8R8A8_SRGB || im->fmt == VK_FORMAT_A8B8G8R8_SRGB_PACK32 ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    im_meta_srgb = meta_srgb_of(im);
     present_one(im, im->img, cx, cy, cw, ch, 1, period, ticket, 1);
 }
 // headless frame shots
@@ -1145,12 +1149,14 @@ static void *present_thread(void *arg) {
         atomic_store(&g_redraw, 0);
         if (g_pq_tail == g_pq_head) {   // a redraw, no new frame
             pthread_mutex_unlock(&g_pq_mu);
-            if (last.im) { pthread_mutex_lock(&g_present_mu); if (swap_make()) present_window(last.im, last.has_crop ? last.crop : NULL, -1, 0); pthread_mutex_unlock(&g_present_mu); }
+            if (last.im) { pthread_mutex_lock(&g_present_mu); im_meta_srgb = meta_srgb_of(last.im); if (swap_make()) present_window(last.im, last.has_crop ? last.crop : NULL, -1, 0); pthread_mutex_unlock(&g_present_mu); }
             continue;
         }
         typeof(g_pq[0]) e = g_pq[g_pq_tail % PQ_N];
         pthread_mutex_unlock(&g_pq_mu);
         if (e.im) { last = e; pthread_mutex_lock(&g_present_mu);
+            im_meta_srgb = meta_srgb_of(e.im);
+            if (!g_swap && im_meta_srgb) g_want = im_meta_srgb;
             if (swap_make()) {
                 VkImage gen[3] = {0, 0, 0}; double hold = 0, out_period = 0;
                 int ng = e.period >= 0 ? dm_fg_frame(e.im, e.has_crop ? e.crop : NULL, e.period, gen, &hold, &out_period) : 0;

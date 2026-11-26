@@ -46,7 +46,7 @@ PACING = {
 }
 KINDS = {'stick_l': 'OV_STICK_L', 'stick_r': 'OV_STICK_R', 'button': 'OV_BUTTON', 'dpad': 'OV_DPAD', 'menu': 'OV_MENU'}
 SINGLE = ('status', 'tested', 'package', 'orientation', 'requires', 'sysdata', 'graphics', 'lan', 'romfs', 'vulkan_driver', 'pacing', 'readme_name', 'readme_image', 'readme_tag', 'readme_note')
-REPEAT = ('setting', 'env', 'overlay')
+REPEAT = ('setting', 'env', 'overlay', 'romfs_file')
 
 
 class ProfileError(Exception):
@@ -132,6 +132,14 @@ class AndroidProfile:
     def env(self):   # ['KEY=VALUE', ...]: the pacing preset's rows, then the profile's env rows
         return PACING.get(self.pacing, []) + self.values('env')
 
+    @property
+    def romfs_files(self):   # {rel_path: text}: lines joined with LF to write into the game's RomFS at port time
+        files = {}
+        for v in self.values('romfs_file'):
+            rel, _, line = v.partition('\t')
+            files.setdefault(rel.strip(), []).append(line)
+        return {rel: '\n'.join(lines) + '\n' for rel, lines in files.items()}
+
     def overlay_table(self):
         """The gamepad layouts: the default ones with this profile's moves (a moved control's x is a fraction of the window's width: its anchor, no offset)"""
         rows = default_layout(); by = {(r['layout'], r['name']): r for r in rows}
@@ -167,6 +175,10 @@ class AndroidProfile:
             if not eq or k not in SETTINGS or val not in SETTINGS[k]: bad.append(f'setting {v!r}: ' + ', '.join(f'{n}={"|".join(vs)}' for n, vs in SETTINGS.items()))
         bad += [f'env {v!r}: KEY=VALUE' for v in self.values('env') if not re.fullmatch(r'[A-Z_][A-Z0-9_]*=.*', v)]
         bad += settings_registry.check_env(self.env, ('profile',), 'env ')   # a typo or a debug-only switch fails the port, not silently the game
+        for v in self.values('romfs_file'):
+            rel, sep, _ = v.partition('\t'); p = Path(rel.strip())
+            if not sep or not rel.strip() or p.is_absolute() or '..' in p.parts:
+                bad.append(f'romfs_file {v!r}: <rel_path>\\t<line>')
         names = {r['name'] for r in default_layout()}
         for v in self.values('overlay'):
             c = v.split()

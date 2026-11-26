@@ -1,0 +1,49 @@
+# Kingdom Come: Deliverance - Royal Edition (US/EU) on Android (keys in docs/ARCHITECTURE.md)
+# Shares CryEngine 3 configuration, Turnip recommendation, and shader/VK workarounds with JP/Asia 010021601C496000; marked experimental until verified on a US/EU device dump.
+status	experimental
+package	org.nx2a.t0100650018fe0000
+orientation	landscape
+graphics	nvn
+lan	1
+vulkan_driver	turnip
+pacing	fixed60
+env	DM_VK_FRONT=2
+env	DM_GPU_TURBO=1
+env	DM_VK_CB_DRAWS=0
+env	DM_VK_ASYNC_PIPE=0
+env	DM_VK_ORDER_KEEP=0
+env	DM_VK_NAN_SANITIZE=1
+env	DM_VK_EXPAND_320X180=1
+romfs_file	user.cfg	r_ShadersAllowCompilation = 0
+romfs_file	user.cfg	r_ShadersRemoteCompiler = 0
+romfs_file	user.cfg	r_ShaderCompilerDontCache = 0
+romfs_file	user.cfg	r_ShaderCompilerServer = 192.168.13.5
+romfs_file	user.cfg	r_ShaderCompilerPort = 61456
+romfs_file	user.cfg	r_ShadersAsyncCompiling = 0
+romfs_file	user.cfg	r_ShadersUserFolder = 0
+romfs_file	user.cfg	r_ShadersDebug = 0
+romfs_file	user.cfg	e_LodFaceAreaTargetSize = 0.0025
+romfs_file	user.cfg	wh_r_UberlodRatio = 4
+romfs_file	user.cfg	e_Dissolve = 0
+romfs_file	user.cfg	r_TexturesStreamPoolSize = 512
+romfs_file	user.cfg	; Balanced far-distance shadows (prevents 2200-draw stall)
+romfs_file	user.cfg	e_ViewDistRatio = 50
+romfs_file	user.cfg	e_ViewDistRatioDetail = 35
+romfs_file	user.cfg	e_ViewDistRatioVegetation = 50
+romfs_file	user.cfg	e_GsmLodsNum = 4
+romfs_file	user.cfg	e_GsmRange = 4.2
+romfs_file	user.cfg	e_GsmRangeStep = 2.8
+romfs_file	user.cfg	e_ShadowsCastViewDistRatio = 0.65
+romfs_file	user.cfg	; Unlock 60 FPS cap & disable buggy post-process passes / DRS thrashing
+romfs_file	user.cfg	sys_MaxFPS = 60
+romfs_file	user.cfg	r_VSync = 0
+romfs_file	user.cfg	r_DynamicResolution = 0
+romfs_file	user.cfg	r_ForceDynamicResolutionIndex = 0
+romfs_file	user.cfg	r_DynamicResolutionMaxAllowedIndex = 0
+romfs_file	user.cfg	r_DepthOfField = 0
+romfs_file	user.cfg	r_MotionBlur = 0
+romfs_file	user.cfg	r_HDRBloom = 0
+romfs_file	user.cfg	r_FogShadows = 0
+romfs_file	user.cfg	r_Sunshafts = 0
+romfs_file	user.cfg	r_Flares = 0
+romfs_file	user.cfg	r_TexMaxAnisotropy = 16

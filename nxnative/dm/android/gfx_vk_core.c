@@ -1079,6 +1079,7 @@ int vk_buf_at(uint64_t addr, uint64_t len, VkBuffer *buf, VkDeviceSize *off) {
 }
 int mtl_addr(uint64_t addr, uint64_t len, void **buf, uint64_t *off) {
     vkpool_t *p = pool_find(addr, len ? len : 1, 0);
+    if (!p) { uint64_t physical = 0; if (nvn_sparse_address_translate(addr, len ? len : 1, &physical)) { addr = physical; p = pool_find(addr, len ? len : 1, 0); } }
     if (!p) return 0;
     if (buf) *buf = (void *)(uintptr_t)p->lo; if (off) *off = addr - p->lo; return 1;
 }
@@ -1565,6 +1566,17 @@ void mtl_sub_copy(uint64_t src, uint64_t dst, uint64_t n) {
     VkBuffer sb, db; VkDeviceSize so, dof;
     if (!n) return;
     if (vk_buf_at(src, n, &sb, &so) && vk_buf_at(dst, n, &db, &dof)) {   // the whole range fits in one buffer on each side: one copy
+        vk_end_pass_land();
+        VkCommandBuffer cb = vk_cmd(); vk_img_barrier_all(cb);
+        VkBufferCopy r = {so, dof, n}; vkCmdCopyBuffer(cb, sb, db, 1, &r);
+        vk_img_barrier_all(cb); vk_gpu_wrote(dst, n);
+        return;
+    }
+    if (nvn_sparse_address_pool(src, 1) && vk_buf_at(dst, n, &db, &dof)) {
+        // Non-contiguous sparse virtual source: gather pages into scratch so GPU->GPU copy stays contiguous.
+        uint8_t *tmp = vk_scratch(n, 16, &sb, &so);
+        if (!tmp) return;
+        nvn_sparse_address_copy(src, tmp, n);
         vk_end_pass_land();
         VkCommandBuffer cb = vk_cmd(); vk_img_barrier_all(cb);
         VkBufferCopy r = {so, dof, n}; vkCmdCopyBuffer(cb, sb, db, 1, &r);

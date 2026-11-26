@@ -1,4 +1,5 @@
 // ---------------- descriptors ----------------
+void vk_tex_wrote(vkimg_t *im);
 static uint64_t c2_handle(int st, int off) {   // the driver's handle table c2, as dmsh_build.py lays it out
     if (off >= 0x20 && off < 0x120) return S.tex[st][(off - 0x20) / 8];
     if (off >= 0x120 && off < 0x160) return S.img[st][(off - 0x120) / 8];
@@ -51,7 +52,11 @@ static void shader_cpu_ready(const vkshader_t *s, int stage) {
 static void graphics_cpu_ready(void) { for (int st = 0; st < 3; st++) shader_cpu_ready(S.sh[st], st); }
 static uint32_t ubo_word(int st, int reg, int off) {
     const p_bind_buf *u = reg >= 0 && reg < 16 ? &S.ubo[st][reg] : NULL; uint32_t v = 0;
-    if (u && u->addr && off >= 0 && (uint64_t)off + 4 <= (u->size ? u->size : 4) && vk_pool_of(u->addr + off, 4)) vk_ubd_read(u->addr + off, 4, (uint8_t *)&v);   // with the deferred updates
+    if (u && u->addr && off >= 0 && (uint64_t)off + 4 <= (u->size ? u->size : 4)) {
+        uint64_t ua = u->addr + off, pa = 0;
+        if (vk_pool_of(ua, 4) || (nvn_sparse_address_translate(ua, 4, &pa) && vk_pool_of((ua = pa), 4)))
+            vk_ubd_read(ua, 4, (uint8_t *)&v);   // with the deferred updates
+    }
     return v;
 }
 // The texture and sampler pools the replayed command buffer last bound, as bases in the host's tables (hle_nvn.c dpool_base; 0 for the first pool of each kind). Handles that bind
@@ -184,7 +189,7 @@ static int tex_desc_for(int st, const dmsv_bind *b, uint64_t h, VkDescriptorImag
         if (logfs) nlogfs++;
         if (g_tracing || logfs) VKLOG("  %stexture binding %d handle %#llx id %d: %ux%u nvn format %#x target %d serial %llu pool %p+%#llx size %#llx (mem %p, flags %#x, pool flags %#x, packaged layout %d) → image %p (%ux%u fmt %d layers %u levels %u, gpu-written %d) view %p", logfs ? "logfs " : "", b->binding, (unsigned long long)h, tid, t->d.width, t->d.height, t->d.format, t->d.target,
                              (unsigned long long)t->serial, (const void *)t->pool, (unsigned long long)t->off, (unsigned long long)t->L.size, (const void *)t->mem, (unsigned)t->d.flags, t->pool ? (unsigned)t->pool->flags : 0u, (int)t->has_layout, (void *)im, im ? im->w : 0, im ? im->h : 0, im ? im->fmt : 0, im ? im->layers : 0, im ? im->levels : 0, im ? (int)im->gpu_w : -1, (void *)ii->imageView);
-        if (im) im->last_use = mtl_last_fence() + 1;
+        if (im) { im->last_use = mtl_last_fence() + 1; if (storage) vk_tex_wrote(im); }
         if (ii->imageView) num = view_num(t, v);
         if (ii->imageView) { g_tvc[ck].epoch = g_set_epoch; g_tvc[ck].gen = g_tex_gen; g_tvc[ck].tid = tid; g_tvc[ck].dim = b->dim; g_tvc[ck].arr = b->flags & 1; g_tvc[ck].v = ii->imageView; g_tvc[ck].im = im; g_tvc[ck].num = num; g_tvc[ck].sc = sc; }
     }

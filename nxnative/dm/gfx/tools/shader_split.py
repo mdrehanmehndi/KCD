@@ -1988,6 +1988,92 @@ def mvgl_nvn_shaders(path, label):
         return found
 
 
+def unlzss(src, usize):
+    """Decompress CryEngine CPCK LZSS payload into usize raw bytes."""
+    ring = bytearray(4096); r = 4078; i = 0; n = len(src); out = bytearray(); app = out.append
+    while i < n and len(out) < usize:
+        fl = src[i]; i += 1
+        for b in range(8):
+            if i >= n or len(out) >= usize: break
+            if fl & (1 << b):
+                c = src[i]; i += 1; app(c); ring[r] = c; r = (r + 1) & 4095
+            else:
+                if i + 1 >= n: break
+                b1 = src[i]; b2 = src[i + 1]; i += 2
+                pos = b1 | ((b2 & 0xf0) << 4)
+                for k in range((b2 & 0x0f) + 3):
+                    c = ring[(pos + k) & 4095]; app(c); ring[r] = c; r = (r + 1) & 4095
+    return bytes(out)
+
+
+def cry_pak_shaders(path, label, out):
+    """Extract all NVN shader permutations from CryEngine ZIP .pak archives (*.fxcb CPCK chunks)."""
+    import zipfile
+    try: z = zipfile.ZipFile(path, 'r')
+    except (zipfile.BadZipFile, NotImplementedError, OSError): return
+    with z:
+        for info in z.infolist():
+            nm = info.filename
+            if info.is_dir() or not nm.lower().endswith('.fxcb'): continue
+            d = z.read(info)
+            if len(d) < 16 or d[:4] != b'CPCK': continue
+            _, _, cnt, doff = struct.unpack_from('<4sIII', d, 0)
+            for idx in range(cnt):
+                if doff + idx * 12 + 12 > len(d): break
+                crc, sf, off = struct.unpack_from('<III', d, doff + idx * 12)
+                fl, sz = sf >> 24, sf & 0xffffff
+                if not sz or off + sz > len(d): continue
+                if fl & 0x80:
+                    if sz < 4: continue
+                    raw = unlzss(d[off + 4:off + sz], struct.unpack_from('<I', d, off)[0])
+                else: raw = d[off:off + sz]
+                skip = []
+                if b'\x91\x68\x86\x19' in raw:
+                    for m in re.finditer(b'\x91\x68\x86\x19', raw):
+                        gsize = struct.unpack_from('<I', raw, m.start() + 0x44)[0] if m.start() + 0x48 <= len(raw) else 0
+                        if 0x760 < gsize <= len(raw) - m.start():
+                            got = glslc_shaders(raw[m.start():m.start() + gsize], f'{label}/{nm}@{crc:08x}@{m.start():x}', need=False)
+                            if got:
+                                out.extend(got)
+                                skip.append((m.start(), m.start() + gsize))
+                pos = consumed = 0
+                while (c := raw.find(CTL_MAGIC, pos)) >= 0:
+                    pos = c + 4
+                    if (c & 3) or c + 0x760 > len(raw) or any(a <= c < b for a, b in skip): continue
+                    nctl, ncode = struct.unpack_from('<I', raw, c + 0x20)[0], struct.unpack_from('<I', raw, c + 0x704)[0]
+                    if not (0x760 <= nctl <= 0x20000 and 0x80 <= ncode <= len(raw) and c + nctl <= len(raw)): continue
+                    ctl = raw[c:c + nctl]
+                    cands = [
+                        c + nctl,
+                        (c + nctl + 15) & ~15, (c + nctl + 31) & ~31, (c + nctl + 63) & ~63, (c + nctl + 255) & ~255,
+                    ]
+                    hi = min(len(raw), c + nctl + 0x400)
+                    for magic in (GFX_MAGIC, CS_MAGIC):
+                        m = raw.find(magic, c + nctl, hi)
+                        while m >= 0:
+                            cands.append(m); m = raw.find(magic, m + 4, hi)
+                    lo = max(consumed, c - ncode - 0x400)
+                    if c - ncode >= consumed: cands.append(c - ncode)
+                    for magic in (GFX_MAGIC, CS_MAGIC):
+                        m = raw.rfind(magic, lo, c)
+                        while m >= 0:
+                            cands.append(m); m = raw.rfind(magic, lo, m)
+                    for align_k in ((c - ncode) & ~15, (c - ncode) & ~31, (c - ncode) & ~63):
+                        if align_k >= consumed: cands.append(align_k)
+                    seen_k = set()
+                    for k in cands:
+                        if k in seen_k or k < consumed or k + ncode > len(raw): continue
+                        seen_k.add(k)
+                        code = raw[k:k + ncode]
+                        if CTL_MAGIC in code: continue
+                        st = glslc_stage(ctl, code)
+                        if st and not check(label, st, ctl, code):
+                            out.append((f'{label}/{nm}#RAW@{crc:08x}@{c:x}', st, ctl, code))
+                            consumed = max(consumed, c + nctl, k + ncode)
+                            pos = max(pos, consumed)
+                            break
+
+
 def scan_file(args):
     """→ (relative path, {key: …}, pairs, extra); extra = this file's Unity type trees, or 'defer' (no type tree, scanned again in the second pass)"""
     path, rel = args[:2]
@@ -2056,6 +2142,9 @@ def scan_file(args):
         return rel, uniq_keys(found), var_pairs(found), trees
     if len(args) > 2:   # a range of LINKDATA entries (linkdata_jobs)
         linkdata_shaders(path, rel, args[2], found)
+        return rel, uniq_keys(found), var_pairs(found), trees
+    if head[:4] == b'PK\x03\x04' and path.lower().endswith('.pak'):
+        cry_pak_shaders(path, '/' + rel, found)
         return rel, uniq_keys(found), var_pairs(found), trees
     if head[:4] == BND2:   # a Criterion Bundle 2 (Need for Speed: Hot Pursuit Remastered's SHADERS.BNDL): GLSLC outputs in its zlib resources (bnd2_shaders)
         found += bnd2_shaders(read_whole(path), '/' + rel)

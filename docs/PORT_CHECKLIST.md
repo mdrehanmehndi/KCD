@@ -13,7 +13,7 @@ with — the game is not missing on Android.
 
 These have an official Android release too, and are ported here anyway: Unpacking.
 
-**82 / 195 ported**
+**84 / 197 ported**
 
 This file is generated: `python3 docs/gen_tables.py` reads the profiles and writes it. The facts
 in a row are the profile's own — the name and the version from `game.tsv`, the status, the note
@@ -92,6 +92,8 @@ the author of the commit that introduced them.
 - [x] Hollow Knight: Silksong · `010013C00E930000` · playable · update 1.0.30000 · 60 fps · ported by @shirai91
 - [ ] Hyrule Warriors: Age of Calamity · `01002B00111A2000` · 1.3.0 · 60 fps
 - [ ] Hyrule Warriors: Definitive Edition · `0100AE00096EA000` · 1.0.1
+- [x] Kingdom Come: Deliverance - Royal Edition · `010021601C496000` · wip · v131072 OnePlus Pad 2 OPD2403 (Snapdragon 8 Gen 3, Adreno 750, Android 16)
+- [x] Kingdom Come: Deliverance - Royal Edition · `0100650018FE0000` · experimental
 - [x] Kirby and the Forgotten Land · `01004D300C5AE000` · playable · update 1.1.0 · 30 fps (as on Switch) · tested on the AYN Thor (Adreno 740) with a Turnip Vulkan driver · ported by @DPR
 - [ ] Kirby Star Allies · `01007E3006DDA000` · 4.0.0a
 - [x] Kirby's Return to Dream Land Deluxe · `01006B601380E000` · playable · 60 fps · tested on the AYN Thor (Adreno 740) with a Turnip Vulkan driver · needs your console's firmware for its fonts (`--firmware`) · ported by @DPR
@@ -199,7 +201,7 @@ the author of the commit that introduced them.
 - [x] The World Ends with You -Final Remix- · `0100C1500B82E000` · playable · base game 1.0.0 · 60 fps · played by touch · ported by @shirai91
 - [x] Tomodachi Life: Living the Dream · `010051F0207B2000` · playable · update 1.0.4 · 60 fps · ported by @shirai91
 - [ ] Trails in the Sky 2nd Chapter · `01007A2027548000` · 1.0.4
-- [x] Trails in the Sky the 2nd (Korean release) · `0100E8B028B54000` · playable · update 1.0.3a · 60 fps in the opening scene · tested on the Xiaomi 23117RK66C (Android 16, Adreno 750) with a Turnip Vulkan driver
+- [x] Trails in the Sky the 2nd (Korean release) · `0100E8B028B54000` · playable · update 1.0.3a · 60 fps in the opening scene · tested on the Xiaomi 23117RK66C (Android 16, Adreno 750) with a Turnip Vulkan driver · ported by @zFitness
 - [ ] TRIANGLE STRATEGY · `0100CC80140F8000` · 1.1.1 · 60 fps
 - [ ] TUNIC · `0100DA801624E000` · 1.0.3 · 60 fps
 - [x] Ultra Kaiju Monster Rancher · `01008E0019388000` · playable · update 1.0.1 · 30 fps (60 runs the game twice as fast) · tested on the AYN Odin 2 (Adreno 740) with a Turnip Vulkan driver · handheld 3D resolution by default, docked in the app menu · tested through the tutorials and battles · ported by @rospec14

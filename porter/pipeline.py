@@ -1404,6 +1404,10 @@ class Port:
         files = {**self.fps_files, **font_files}
         host = icon = None; drivers = []
         romfs, romfs_at, zenv = self.game / 'RomFS', None, []
+        if romfs.is_dir() and getattr(self.ap, 'romfs_files', None):
+            for rel, content in self.ap.romfs_files.items():
+                target = romfs / rel; target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding='utf-8', newline='\n')
         if getattr(self.ap, 'romfs_zstd', False) and romfs.is_dir():   # android.tsv romfs zstd: packed copies of the files that compress, made once into the build folder; the rest stay links to the extraction
             PROG.set(step='compressing the RomFS', done=0, total=1, unit='B')
             nf, npk, raw, out = romfs_pack.pack_tree(romfs, self.aw / 'romfs_zstd' / self.pkg_ver, self.o.jobs, progress=lambda d, t: PROG.set(step='compressing the RomFS', done=d, total=t, unit='B'))

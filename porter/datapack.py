@@ -42,7 +42,7 @@ def link_or_copy(src, dst, progress=None):
 
 def link_tree(src, dst, progress=None):   # (files, bytes)
     n = b = 0
-    for root, _, files in os.walk(src):
+    for root, _, files in os.walk(src, followlinks=True):
         for f in files:
             s = Path(root) / f
             link_or_copy(s, dst / s.relative_to(src), progress); n += 1; b += s.stat().st_size
@@ -50,7 +50,7 @@ def link_tree(src, dst, progress=None):   # (files, bytes)
 
 
 def tree_files(src):   # every file under a tree: the pack asks for their sizes before the copy, to report its own progress
-    return (Path(root) / f for root, _, files in os.walk(src) for f in files)
+    return (Path(root) / f for root, _, files in os.walk(src, followlinks=True) for f in files)
 
 
 def files_folder(package): return f'/sdcard/Android/data/{package}/files'
@@ -66,14 +66,14 @@ def part_key(d, part):
     import hashlib
     r = Path(d) / part
     if not r.is_dir(): return None
-    files = sorted((p.relative_to(r).as_posix(), p.stat().st_size) for p in r.rglob('*') if p.is_file())
+    files = sorted((p.relative_to(r).as_posix(), p.stat().st_size) for p in tree_files(r))
     h = hashlib.sha256(''.join(f'{rel}\t{size}\n' for rel, size in files).encode('utf-8')).hexdigest()
     return {'files': len(files), 'bytes': sum(s for _, s in files), 'key': h}
 
 
 def romfs_sizes(d):   # {path in the RomFS: size} of the pack in d, '/'-separated as the device lists them (install --romfs-at compares a folder on the device with it)
     r = Path(d) / ROMFS
-    return {p.relative_to(r).as_posix(): p.stat().st_size for p in r.rglob('*') if p.is_file()} if r.is_dir() else {}
+    return {p.relative_to(r).as_posix(): p.stat().st_size for p in tree_files(r)} if r.is_dir() else {}
 
 
 def build(dst, *, profile, version, display, patched, romfs, shaders, aoc=None, sysdata=None, language='en-US', package=None, env=(), settings=None, files=None, text=None,

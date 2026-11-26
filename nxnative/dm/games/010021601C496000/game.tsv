@@ -1,0 +1,38 @@
+# Kingdom Come: Deliverance - Royal Edition (Japan/Asia), NintendoSDK 14.3.0, 3 NSO modules (main, subsdk0, sdk)
+
+# ---- Identity ----
+title_id	010021601C496000
+program_id	010021601C496000
+
+# ---- App ----
+name	Kingdom Come: Deliverance - Royal Edition
+ipa	KingdomComeDeliveranceRoyalEdition.ipa
+app_category	public.app-category.games
+
+# ---- Versions ----
+build	v131072	1.9.6H	main=7a450848cfdec18e329ab8a1b5b658b4	subsdk0=75c83c09e25f9a4e60bd960815722e86	sdk=2aef2cffb104ee7c9e212fd2f4c731e9
+package	v131072
+shader_versions	v131072
+
+# ---- Files ----
+modules	main subsdk0 sdk
+romfs_marker	localization/japanese-part0.pak
+zip_store	.dds:.pak:.metallib
+
+# ---- Memory ----
+mem_reserve	0x400000000
+mem_alias	0x3c0000000
+mem_stack	0x10000000
+app_pool	0xCD500000
+sys_resource	0xa00000
+
+# ---- Runtime & Pacing ----
+present_interval	display
+fps_target	60
+order_keep	off
+small_vpool_sparse	on
+sock_loopback	on
+
+# ---- Shader split ----
+shader_groups	/data/=data /localization/=localization /engine/=engine
+shader_note	Kingdom Come: Deliverance - Royal Edition (JP/Asia) shaders

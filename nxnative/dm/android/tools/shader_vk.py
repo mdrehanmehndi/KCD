@@ -32,7 +32,10 @@ a = ap.parse_args()
 GAME = dmsh_chain.load_game()
 FACTS = dmsh_facts.load()
 MAP = str(GAME.table('shader_map.tsv'))
-XLATE_DLL = a.xlate or str(TOOLS / 'dmsh_xlate_bin/dmsh_xlate.dll')
+_PREBUILT_XLATE = HERE.parents[3] / 'tools/dmsh_xlate/dmsh_xlate.dll'
+XLATE_DLL = (a.xlate
+             or (str(Path(os.environ['NX2A_DMSH_XLATE']) / 'dmsh_xlate.dll') if os.environ.get('NX2A_DMSH_XLATE') else '')
+             or (str(_PREBUILT_XLATE) if _PREBUILT_XLATE.is_file() else str(TOOLS / 'dmsh_xlate_bin/dmsh_xlate.dll')))
 STAGES = {'vs': 0, 'ps': 1, 'gs': 2, 'hs': 3, 'ds': 4, 'cs': 5}   # NVN stage numbers
 # Storage buffers are bound from a 256-byte boundary below their address (gfx_vk_exec.c SB_ALIGN, the same number): Vulkan's largest minStorageBufferOffsetAlignment, so a multiple of
 # every device's; the translator offsets every storage access by the address's distance from that boundary (Program.cs QueryHostStorageBufferOffsetAlignment)

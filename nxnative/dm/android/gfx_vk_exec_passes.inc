@@ -656,6 +656,11 @@ static int begin_pass(void) {
     P_da = da; P_sa = sa; P_cleared = 0;
     P_ri = (VkRenderingInfo){VK_STRUCTURE_TYPE_RENDERING_INFO, NULL, 0, {{0, 0}, {w, h}}, layers, 0, (uint32_t)ncol, P_ca,
                              (S.daspect & VK_IMAGE_ASPECT_DEPTH_BIT) ? &P_da : NULL, (S.daspect & VK_IMAGE_ASPECT_STENCIL_BIT) ? &P_sa : NULL};
+    { static int exp320 = -1; if (exp320 < 0) { const char *e = getenv("DM_VK_EXPAND_320X180"); exp320 = e && atoi(e) != 0; }
+      if (exp320 && w == 1280 && h == 720 && S.vp[0][2] == 320.f && S.vp[0][3] == 180.f) {
+          S.vp[0][0] = 0.f; S.vp[0][1] = 0.f; S.vp[0][2] = 1280.f; S.vp[0][3] = 720.f;
+          if (S.sc_set && S.sc.w == 320 && S.sc.h == 180) S.sc_set = 0;
+      } }
     S.pass_open = 2; S.pass_w = w; S.pass_h = h; S.samples = samples; S.ncol = ncol; S.bound_pipe = VK_NULL_HANDLE;
     return 1;
 }
@@ -756,6 +761,10 @@ static void clear_ds(const p_clear_ds *c) {
     as &= S.daspect; if (!as) return;
     VkClearAttachment a = {as, 0, {.depthStencil = {c->depth, (uint32_t)c->stencil}}};
     VkClearRect r = {scissor_rect(), 0, P_ri.layerCount ? P_ri.layerCount : 1};   // every layer (clear_color)
+    { static int exp320 = -1; if (exp320 < 0) { const char *e = getenv("DM_VK_EXPAND_320X180"); exp320 = e && atoi(e) != 0; }
+      if (exp320 && S.pass_open == 2 && S.pass_w == 1280 && S.pass_h == 720 && S.sc_set && S.sc.x == 0 && S.sc.y == 0 && S.sc.w == 320 && S.sc.h == 180) {
+          r.rect.offset.x = 0; r.rect.offset.y = 0; r.rect.extent.width = S.pass_w; r.rect.extent.height = S.pass_h;
+      } }
     if (g_x_tracepass == -2) VKLOG("--- depth-stencil clear: depth %g (mask %d), stencil %d (mask %#x), %ux%u at %d,%d, in pass %d%s", c->depth, (int)c->depth_mask, (int)c->stencil, (unsigned)c->stencil_mask,
         r.rect.extent.width, r.rect.extent.height, r.rect.offset.x, r.rect.offset.y, g_sub_pass - 1 + (S.pass_open == 2), S.pass_open == 2 ? " (before its first draw)" : "");
     if (S.pass_open == 2 && pass_whole(r.rect) && (!(as & VK_IMAGE_ASPECT_STENCIL_BIT) || (c->stencil_mask & 0xff) == 0xff)) {   // into the load ops

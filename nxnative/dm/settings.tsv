@@ -267,10 +267,11 @@ DM_VK_CRUMBS	bool		debug	start	gfx_vk_exec.c	for a device lost (GPU hang): each 
 DM_VK_DBG_DRAW	int		debug	live	gfx_vk_exec.c	bisection aids: skip command kinds; 1 no draw calls, 2 no vertex buffers, 4 no descriptor sets
 DM_VK_DRIVER	str		porter	start	gfx_vk_core.c	the Vulkan driver library in the APK (porter --vulkan-driver, e.g. Turnip)
 DM_VK_DYN_UBO	bool		debug	start	gfx_vk_shader.c	no dynamic uniform-buffer offsets (descriptor reuse drops)
+DM_VK_EXPAND_320X180	bool	0	profile	start	gfx_vk_exec.c	1 = expand stale 320x180 viewport and scissor on 1280x720 passes to full target
 DM_VK_FDZ	bool	1	profile	live	gfx_vk_exec.c	no fragment-depth variants: draws that test a depth buffer a fragment shader wrote through `gl_FragDepth` (in the last two presents) normally get a variant of their fragment shader that writes `gl_FragDepth = gl_FragCoord.z`, the same depth tested after the shader, out of Adreno's early culling, whi
 DM_VK_FG_REFRESH_CAP	bool	1	debug	?	dm_framegen.c	0 = the frame generator ignores the display's refresh cycle cap (diagnosis of pacing against the display)
 DM_VK_FLIPY	bool		debug	live	gfx_vk_exec.c	the old clip-space y convention (pictures flip)
-DM_VK_FRONT	int		debug	start	gfx_vk_exec.c	2`
+DM_VK_FRONT	int		profile	start	gfx_vk_exec.c	0/1 force Vulkan front face; 2 = invert convention
 DM_VK_GS_SPLIT	bool	0	profile	live	gfx_vk_exec.c	1 = split geometry-shader draws (gfx_vk_gs_split.c)
 DM_VK_IMG_BLOCKS	bool		debug	start	gfx_vk_core.c	small images take a slot of a shared memory block (default); 0: every image gets memory of its own (A/B)
 DM_VK_LIN_BACK	bool		debug	live	gfx_vk_exec.c	what the GPU draws into a linear render target (NVN `LINEAR_RENDER_TARGET`) stays in the Vulkan image, as before (default: copied back to the texture's pool memory after the pass, so the CPU can read it; Super Mario Odyssey's ground fog reads its wave surface this way)
@@ -288,11 +289,12 @@ DM_VK_MEM_DIAG	bool		debug	start	gfx_vk_core.c	enabled storage-image features (e
 DM_VK_MIP_MAX	int		debug	start	gfx_vk_tex.c	caps every sampler's `maxLod` at that level (0: always the base level; a sampler that already stops lower keeps its own, and `minLod` is lowered to it too): tells whether a flat material is the mip choice or the texture / UVs
 DM_VK_MT_REPLAY	bool	0	profile	start	gfx_vk_dq.c	two-stage replay: the vkCmd* calls (40 of them) are copied into a 32 MB ring and a "vk record" thread makes the real calls in order; the calls that end, submit or present a command buffer (and pool resets, waits) wait for the ring to empty first; a call with a pNext the copy does not know runs direc
 DM_VK_NAN_MINMAX	str		debug	?	gfx_vk_shader.c	
+DM_VK_NAN_SANITIZE	bool	0	profile	start	gfx_vk_shader.c	1 = sanitize NaN/Inf on fragment color output OpStore while keeping internal math and RelaxedPrecision
 DM_VK_NOCULL	str		debug	start	gfx_vk_exec.c	no face culling (test for winding bugs)
 DM_VK_NOPCACHE	str		debug	start	gfx_vk_pipeline_cache.inc	start with an empty Vulkan pipeline cache (the saved one is ignored; app-owned files cannot be deleted over adb)
 DM_VK_NOPREWARM	str		debug	start	gfx_vk_exec.c	no pipeline prewarm, and no compute pipelines made ahead at the first submission
 DM_VK_NO_ZEROCOPY	str		debug	?	gfx_vk_core.c	DM_VK_NO_ZEROCOPY (set at all): every pool copied
-DM_VK_ORDER_KEEP	int		debug	?	gfx_vk_exec.c	
+DM_VK_ORDER_KEEP	int	0	profile	live	gfx_vk_exec.c	0 = break passes on barriers; 1 = keep open across order-only barriers
 DM_VK_PACE	bool		debug	live	gfx_vk_present.c	present without desired times (`VK_GOOGLE_display_timing`): frames go out at the first vsync after they are latched, as before. On, each frame is timed at the last one's plus the game's period on the display's vsync grid; the log's `[perf] display timing` line counts resyncs (a longer frame where th
 DM_VK_PACE_LOG	bool		debug	live	gfx_vk_present.c	logs the display pacing every 600 frames (`pace log:` the measured lead from a present call to the frame's earliest possible present, the driver's present margin) and each resync with its predicted shortfall
 DM_VK_PASSDUMP	bool		debug	live	gfx_vk_exec.c	dump each pass's first colour target and its depth (PPM, NaN counts, depth stretched) for one frame; `=N` waits N−1 presents first. **The dump adds barriers and depth reads, which can hide bugs**

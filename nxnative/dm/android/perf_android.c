@@ -91,6 +91,7 @@ static int turbo_need(int on) {
 // on_pause, on_destroy, host_thread when the game ends itself); the next presents set it again. A device without KGSL (Mali, Xclipse) or one that refuses the ioctl is tried once and then left alone.
 static pthread_mutex_t g_turbo_mu = PTHREAD_MUTEX_INITIALIZER;
 static int g_turbo_on, g_turbo_dead;   // what was last set; the property could not be set
+static _Atomic int g_perf_resumed;
 static int turbo_set(int want) {
     struct { unsigned type; void *value; size_t size; } prop; uint32_t enable = !want;   // (kgsl.h kgsl_device_getproperty; KGSL_PROP_PWRCTRL 0xE: 0 = power control off)
     prop.type = 0xE; prop.value = &enable; prop.size = sizeof enable;
@@ -117,6 +118,10 @@ void dm_perf_gpu_release(void) {
     pthread_mutex_lock(&g_turbo_mu);
     if (g_turbo_on && !turbo_set(0)) { g_turbo_on = 0; LOG("[perf] DM_GPU_TURBO: the GPU's own clock control again (the app paused or ended)"); }
     pthread_mutex_unlock(&g_turbo_mu);
+}
+void dm_perf_resume(void) {
+    atomic_store(&g_perf_resumed, 1);
+    if (dm_pacing_turbo() == 1) gpu_turbo();
 }
 
 static void hint_init(int64_t target) {
@@ -422,7 +427,15 @@ void dm_perf_frame(double period) {
     // and the work then never shows the room to step back up (NEO stayed at 30 fps with frames of 31 to 48 ms)
     if (g_game_period && (int64_t)g_game_period < p) p = (int64_t)g_game_period;
     hint_init(p);
-    { static unsigned n; if (++n % 60 == 0) gpu_turbo(); }
+    if (atomic_exchange(&g_perf_resumed, 0)) {
+        g_work_start = 0; g_prev_present = 0;
+        gpu_turbo();
+        if (g_hint) {
+            if (H.update) H.update(g_hint, p);
+            if (H.set_threads && g_hint_n > 0) H.set_threads(g_hint, g_hint_tids, (size_t)g_hint_n);
+            if (H.increase) H.increase(g_hint, true, true, "app resumed");
+        }
+    } else { static unsigned n; if (++n % 60 == 0) gpu_turbo(); }
     if (g_work_start) {   // (a longer span: the game was held, by the pause menu or the background)
         int64_t w = g_prev_present ? t - g_prev_present - g_pace : t - g_work_start;
         int64_t pq = g_prev_present ? g_pq : 0, pace = dm_perf_pq_pace(pq);   // (t - g_work_start starts after the wait already)
