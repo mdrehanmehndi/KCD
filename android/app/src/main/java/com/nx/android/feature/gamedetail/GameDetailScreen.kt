@@ -640,12 +640,6 @@ private fun GameDetailScreen(lib: LibraryState, port: PortState,
                 }
             }
         }
-        // 助手的入口：贴在面板自己的右下角，不拖（面板盖住了页面的那一角，入口得由面板带）
-        Box(Modifier.align(Alignment.BottomEnd).padding(24.dp)) {
-            if (agentVisible) {
-                AgentEntry(onClick = onOpenAgent)
-            }
-        }
         }
     }
 

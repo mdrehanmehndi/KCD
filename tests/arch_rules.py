@@ -68,7 +68,8 @@ check('profiles hold data only (code only as patches.py)', not bad, ', '.join(ba
 GAME_FILES = {'README.md', 'android.tsv', 'game.tsv', 'patches.py', 'fps_locks.tsv', 'ue_malloc.tsv',
               'bf_want.tsv', 'pso_manifest.tsv', 'pso_pairs.tsv', 'shader_facts.tsv', 'shader_facts_manual.tsv', 'shader_map.tsv',
               'shader_map.tsv.conflicts.tsv', 'shader_pairs.tsv', 'android_shader_handles.tsv', 'vk_capture.tsv', 'gl_capture.tsv',
-              'bench.tsv', 'dual_want.tsv', 'geo_mesh.tsv', 'shader_seen.tsv', 'smoke.tsv'}
+              'bench.tsv', 'dual_want.tsv', 'geo_mesh.tsv', 'shader_seen.tsv', 'smoke.tsv',
+              'prebuilt/libdmplay.so', 'prebuilt/shaders.dmsv'}
 bad = []
 for f in files:
     m = re.match(r'nxnative/dm/games/([^/]+)/(.+)', f)

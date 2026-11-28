@@ -1047,15 +1047,6 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
                 packPath = packPath,
                 modifier = Modifier.align(Alignment.TopCenter).displayCutoutPadding().padding(top = 8.dp),
             )
-            // 助手的徽标：右边缘垂直居中的一条小把手，点它就滑出助手抽屉。
-            // 它排在设置抽屉之前——设置抽屉开着的时候，那块遮罩把它盖住。
-            // 玩家可以在设置里收走它（那条把手是画面上的东西，游戏画面该是游戏的）。
-            if (agentBadge && !agentDrawerOpen) {
-                AgentEdgeBadge(
-                    onClick = { openAgentDrawer() },
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                )
-            }
             FloatingGlitchPill(
                 visible = devBuildInfo != null && devGlitchPill && !drawerOpen && !editorOpen && !paused,
                 modifier = Modifier.align(Alignment.TopEnd),

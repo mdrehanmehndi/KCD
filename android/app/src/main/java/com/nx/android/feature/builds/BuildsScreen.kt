@@ -188,12 +188,6 @@ private fun BuildsScreen(lib: LibraryState, viewModel: BuildsViewModel, uiState:
         }
         Spacer(Modifier.height(12.dp))
     }
-    // 助手的入口：贴在页面的右下角，不拖。它在滚动列外面，滚到哪儿都在那儿
-    Box(Modifier.align(Alignment.BottomEnd).padding(24.dp)) {
-        if (agentVisible) {
-            AgentEntry(onClick = onOpenAgent)
-        }
-    }
     }
 }
 

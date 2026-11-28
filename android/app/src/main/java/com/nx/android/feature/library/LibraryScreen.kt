@@ -292,9 +292,6 @@ internal fun LibraryContent(
                     )
                 )
             }
-            if (agentVisible) {
-                AgentEntry(onClick = onOpenAgent)
-            }
         }
     }
     }
