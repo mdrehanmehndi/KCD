@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">KCD Play</string>
+    <string name="app_name" translatable="false">KCD I</string>
     <string name="app_tab_library">Library</string>
     <string name="app_tab_builds">Builds</string>
     <string name="app_tab_settings">Settings</string>

@@ -288,13 +288,10 @@ private fun TargetCard(lib: LibraryState, port: BuildsUiState, viewModel: Builds
     var cfg by remember(f.absolutePath, viewModel.preparedConfig) {
         mutableStateOf(viewModel.preparedConfig ?: lib.configOf(f))
     }
-    // 配置默认展开：选中游戏后玩家一眼看到当前选项
-    var configOpen by remember(f.absolutePath) { mutableStateOf(true) }
     val storageOk = actions.storageOk()
     val canStart = f.isFile && f.canRead() && envReady && storageOk && !port.running && keys.isNotBlank() && status != GameStatus.PORTING
     val info = viewModel.gameInfo.info
 
-    // 三张卡，一件事一张：目标（是哪个游戏、文件在哪）· 识别到的文件 · 构建选项
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Section(stringResource(R.string.builds_target)) {
             // 身份块：状态徽章、游戏名、title ID、库的状态
@@ -351,36 +348,7 @@ private fun TargetCard(lib: LibraryState, port: BuildsUiState, viewModel: Builds
             }
         }
 
-        // 构建选项：选项（可收起）与开始按钮
-        OptionsCard(open = configOpen, onToggle = { configOpen = !configOpen }) {
-            if (configOpen) {
-                ConfigRow(stringResource(R.string.builds_touch_game), cfg.touch) { cfg = cfg.copy(touch = it); lib.setConfig(f, cfg) }
-                ConfigRow(stringResource(R.string.builds_60fps), cfg.fps60) { cfg = cfg.copy(fps60 = it); lib.setConfig(f, cfg) }
-                ConfigRow(stringResource(R.string.builds_experimental), cfg.experimental) { cfg = cfg.copy(experimental = it); lib.setConfig(f, cfg) }
-                AliasRow(cfg.aliasHeadroom) { cfg = cfg.copy(aliasHeadroom = it); lib.setConfig(f, cfg) }
-                Hint(stringResource(R.string.builds_alias_hint), size = 11.sp)
-                // 玩家自己的覆盖：系统字体、固件 dump、多线程回放
-                PathOptionRow(
-                    label = stringResource(R.string.builds_shared_font),
-                    value = cfg.sharedFont,
-                    empty = stringResource(R.string.builds_shared_font_default),
-                    onPick = {
-                        onRequest(PickerRequest(PickerMode.FILE, setOf("ttf"), null,
-                            locale.str(R.string.builds_shared_font_pick), onPicked = { file ->
-                                cfg = cfg.copy(sharedFont = file.absolutePath); lib.setConfig(f, cfg)
-                            }))
-                    },
-                    onClear = { cfg = cfg.copy(sharedFont = ""); lib.setConfig(f, cfg) },
-                )
-                Hint(stringResource(R.string.builds_shared_font_hint), size = 11.sp)
-                // 固件是整机级的一份，设置页管：这里只管这一轮游戏的事
-                ConfigRow(stringResource(R.string.builds_mt_replay), cfg.mtReplay) { cfg = cfg.copy(mtReplay = it); lib.setConfig(f, cfg) }
-                Hint(stringResource(R.string.builds_mt_replay_hint), size = 11.sp)
-                // 内存紧张的机器：着色器翻译少开几个进程，慢一些，但不被系统杀
-                ConfigRow(stringResource(R.string.builds_low_mem), cfg.lowMem) { cfg = cfg.copy(lowMem = it); lib.setConfig(f, cfg) }
-                Hint(stringResource(R.string.builds_low_mem_hint), size = 11.sp)
-            }
-
+        GlassPanel(modifier = Modifier.fillMaxWidth(), contentPadding = 16.dp) {
             if (!canStart) {
                 Text(
                     when {
@@ -479,7 +447,6 @@ private fun TargetIdentity(f: File, info: GameInfo?, status: GameStatus, ported:
     val titleId = info?.titleId?.takeIf { it.isNotEmpty() } ?: GameIdentity.titleIdIn(f.name)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (info != null) ProfileChip(info.status)
             Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }

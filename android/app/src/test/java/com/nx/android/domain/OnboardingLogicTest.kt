@@ -47,8 +47,9 @@ class OnboardingLogicTest {
     }
 
     @Test
-    fun `done never advances by its gate`() {
-        assertFalse(OnboardingLogic.canAdvance(ObStep.DONE, facts()))
+    fun `build never advances by its gate`() {
+        assertTrue(OnboardingLogic.canAdvance(ObStep.DONE, facts()))
+        assertFalse(OnboardingLogic.canAdvance(ObStep.BUILD, facts()))
     }
 
     // ---- the action of a step ------------------------------------------------------------------------------------
@@ -56,16 +57,16 @@ class OnboardingLogicTest {
     @Test
     fun `the last step's action is always available`() {
         // the way into the library: the player may always take it once they are there
-        assertTrue(OnboardingLogic.canAct(ObStep.DONE, facts()))
-        assertTrue(OnboardingLogic.canAct(ObStep.DONE, facts(storage = false, env = false, keysOk = false)))
+        assertTrue(OnboardingLogic.canAct(ObStep.BUILD, facts()))
+        assertTrue(OnboardingLogic.canAct(ObStep.BUILD, facts(storage = false, env = false, keysOk = false)))
         // the gate itself still says no: the last step has no next step
-        assertFalse(OnboardingLogic.canAdvance(ObStep.DONE, facts()))
+        assertFalse(OnboardingLogic.canAdvance(ObStep.BUILD, facts()))
     }
 
     @Test
     fun `acting on a step follows that step's own gate`() {
         for (s in ObStep.entries) {
-            if (s == ObStep.DONE) continue
+            if (s == ObStep.BUILD) continue
             assertEquals(OnboardingLogic.canAdvance(s, facts()), OnboardingLogic.canAct(s, facts()))
         }
         assertFalse(OnboardingLogic.canAct(ObStep.ENV, facts(env = false)))

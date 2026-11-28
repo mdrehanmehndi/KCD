@@ -74,10 +74,9 @@ class EnvCheckTest {
     }
 
     @Test
-    fun `the chip is a hint when the machine's firmware is not imported`() {
-        // 固件是可选的：缺了它 App 照样能用，所以是黄的，不是红的
+    fun `the chip stays ready when firmware is not imported`() {
         assertEquals(
-            EnvCheck.Chip.HINT,
+            EnvCheck.Chip.READY,
             EnvCheck.chip(envReady = true, keysOk = true, firmwareImported = false),
         )
     }

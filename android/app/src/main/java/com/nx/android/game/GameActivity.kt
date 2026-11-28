@@ -648,9 +648,7 @@ class GameActivity : ComponentActivity(), SurfaceHolder.Callback {
         hudFahrenheit = prefs.bool(PrefsStore.HUD_TEMP_F, false)
         // 助手的游戏内入口：默认在画面上，玩家可以在设置里收走
         agentBadge = prefs.bool(PrefsStore.AGENT_BADGE, true)
-        val devDir = if (prefs.bool(PrefsStore.DEV_AUTO_SYNC, true) && !titleId.isNullOrBlank()) {
-            DevSync.findGameDevDir(DevSync.defaultDevRoot(), titleId)
-        } else null
+        val devDir: File? = null
         val hostFile = File(host)
         if (devDir != null) {
             devGlitchPill = prefs.bool(PrefsStore.DEV_GLITCH_PILL, false)

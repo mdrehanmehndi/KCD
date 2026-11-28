@@ -59,6 +59,7 @@ void vk_shader_c1(vkshader_t *s, VkBuffer *b, VkDeviceSize *o, VkDeviceSize *n) 
 VkBuffer vk_support_buffer(void) { abort(); }
 VkBuffer vk_zero_buffer(void) { abort(); }
 static void vk_cross(int k, uint64_t a, uint64_t n, const vkpool_t *p) { abort(); }
+void vk_ubd_read(uint64_t a, uint64_t n, uint8_t *d) { (void)a; (void)n; (void)d; abort(); }
 static int tex_desc_for(int st, const dmsv_bind *b, uint64_t h, VkDescriptorImageInfo *i, int storage) { abort(); }
 VkSampler vk_samp_by_id(int id) { abort(); }
 VkSampler vk_dummy_sampler(void) { abort(); }

@@ -19,8 +19,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.nx.android.R
 import com.nx.android.core.ui.PreviewSurface
-import com.nx.android.core.ui.components.FirmwareHint
-import com.nx.android.core.ui.components.FirmwareRow
 import com.nx.android.core.ui.components.Hint
 import com.nx.android.core.ui.components.QuietButton
 import com.nx.android.core.ui.components.Section
@@ -204,13 +202,6 @@ internal fun KeysStep(
             }
         }
         Hint(stringResource(R.string.onb_keys_common_places))
-        // 固件（可选）：整机级的一份。读主机系统数据的游戏才需要它，导入了就用，不导入也能过
-        // 这一行不显示清除按钮：引导页里它没有可用的动作，导入的那份由设置页去清
-        FirmwareRow(
-            imported = firmware,
-            onImport = onChooseFirmwareFile,
-        )
-        FirmwareHint()
     }
 //    if (!uiState.keysOk && !uiState.keysChecking) {
 //        Row(verticalAlignment = Alignment.CenterVertically) {

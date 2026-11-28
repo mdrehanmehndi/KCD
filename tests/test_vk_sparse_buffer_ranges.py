@@ -63,7 +63,7 @@ class SparseBufferRanges(unittest.TestCase):
         self.assertIn('atomic_fetch_sub_explicit(&g_vp_count, 1', nvn)
         pool_lookup = nvn.split('const void *nvn_sparse_address_pool(', 1)[1].split('\n}', 1)[0]
         self.assertLess(pool_lookup.index('if (!vpool_any()) return NULL;'), pool_lookup.index('pthread_mutex_lock(&g_vp_mu)'))
-        self.assertIn('(im->packaged && !im->gpu_w)', tex)
+        self.assertIn('(im->packaged && (f->compressed || !im->gpu_w))', tex)
         self.assertIn('SPARSE_SBUF_COPY_CAP = 32 * 1024 * 1024', exec_src)
         self.assertLess(exec_src.index('if (size > SPARSE_SBUF_COPY_CAP)'), exec_src.index('vk_scratch(size, SB_ALIGN'))
         tex_view = (dm / 'android/gfx_vk_tex.c').read_text(encoding='utf-8').split('VkBufferView vk_tbuf_view(', 1)[1].split('\n}\n', 1)[0]

@@ -494,7 +494,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Termux / shell direct launch (`am start -a com.rehan.kcdplay.ACTION_DEV_LAUNCH --es title_id ...`
+     * Termux / shell direct launch (`am start -a com.warhome.kcd.ACTION_DEV_LAUNCH --es title_id ...`
      * or `kcdplay://launch/<title_id>`). Runs pre-launch sync from `/sdcard/Download/nx2a_dev/<title_id>/`
      * when All Files Access is granted and starts the game directly into play mode.
      */

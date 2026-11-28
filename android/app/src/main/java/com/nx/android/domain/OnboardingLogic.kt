@@ -1,7 +1,7 @@
 package com.nx.android.domain
 
 /** The guided setup's steps */
-enum class ObStep { WELCOME, ENV, KEYS, DONE }
+enum class ObStep { WELCOME, ENV, KEYS, DONE, BUILD }
 
 /** What the machine can do right now: the facts the gates read */
 data class ObFacts(
@@ -37,7 +37,8 @@ object OnboardingLogic {
         ObStep.WELCOME -> f.storageOk && f.freeGB >= f.neededGB
         ObStep.ENV -> f.envReady
         ObStep.KEYS -> f.keysOk || f.keysSkipped
-        ObStep.DONE -> false
+        ObStep.DONE -> true
+        ObStep.BUILD -> false
     }
 
     /**
@@ -45,7 +46,7 @@ object OnboardingLogic {
      * always allowed; the other steps move on to the next one, so their answer is the next one's premise.
      */
     fun canAct(step: ObStep, f: ObFacts): Boolean =
-        if (step == ObStep.DONE) true else canAdvance(step, f)
+        if (step == ObStep.BUILD) true else canAdvance(step, f)
 
     /**
      * Where a saved step lands now: back to the earliest one whose premise no longer holds. The permission

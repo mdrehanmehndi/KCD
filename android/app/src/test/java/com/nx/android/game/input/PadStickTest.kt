@@ -105,4 +105,45 @@ class PadStickTest {
         // 这次触摸交给了游戏（作为游戏的触点）
         assertEquals(1, out.ids.size)
     }
+
+    @Test
+    fun `dynamic half screen routes left half to left stick and second left touch to right stick camera`() {
+        val r = PadRouter()
+        val out = PadOutput()
+        val W = 2000f
+        val btn = PadControl("a", "button", 1L, 1.8f, 0.8f, 0.06f, 0.06f, 0.06f, 0.02f, 1f)
+        val ctrls = listOf(stick, btn)
+
+        // Finger 0 lands on open left half -> claims Left Stick
+        r.route(PadRouter.ACTION_DOWN, 0, intArrayOf(0), floatArrayOf(200f), floatArrayOf(500f), 1, ctrls, H, out, W)
+        assertEquals(0, r.leftStickPointerId)
+        assertEquals(-1, r.rightStickPointerId)
+
+        // Move finger 0 right -> drives lx
+        r.route(PadRouter.ACTION_MOVE, 0, intArrayOf(0), floatArrayOf(300f), floatArrayOf(500f), 1, ctrls, H, out, W)
+        assertTrue(out.lx > 0)
+        assertEquals(0, out.rx)
+
+        // Finger 1 lands on left half while Left Stick is held -> falls back to Right Stick (camera)
+        r.route(PadRouter.ACTION_POINTER_DOWN, 1, intArrayOf(0, 1), floatArrayOf(300f, 350f), floatArrayOf(500f, 300f), 2, ctrls, H, out, W)
+        assertEquals(0, r.leftStickPointerId)
+        assertEquals(1, r.rightStickPointerId)
+
+        // Move finger 1 -> drives rx without disturbing lx
+        r.route(PadRouter.ACTION_MOVE, 0, intArrayOf(0, 1), floatArrayOf(300f, 450f), floatArrayOf(500f, 300f), 2, ctrls, H, out, W)
+        assertTrue(out.lx > 0)
+        assertTrue(out.rx > 0)
+
+        // Lift finger 1 -> releases Right Stick only, Left Stick stays active
+        r.route(PadRouter.ACTION_POINTER_UP, 1, intArrayOf(0, 1), floatArrayOf(300f, 450f), floatArrayOf(500f, 300f), 2, ctrls, H, out, W)
+        assertEquals(0, r.leftStickPointerId)
+        assertEquals(-1, r.rightStickPointerId)
+        assertTrue(out.lx > 0)
+        assertEquals(0, out.rx)
+
+        // Discrete button still takes priority over right-half camera zone
+        r.route(PadRouter.ACTION_POINTER_DOWN, 1, intArrayOf(0, 2), floatArrayOf(300f, 1.8f * H), floatArrayOf(500f, 0.8f * H), 2, ctrls, H, out, W)
+        assertEquals(1L, out.buttons)
+        assertEquals(-1, r.rightStickPointerId)
+    }
 }

@@ -36,7 +36,7 @@ class AppNameTest {
 
     @Test
     fun theAppHasOneName() {
-        assertEquals("KCD Play", string(res("values/strings.xml"), "app_name"))
+        assertEquals("KCD I", string(res("values/strings.xml"), "app_name"))
     }
 
     @Test

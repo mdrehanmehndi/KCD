@@ -63,7 +63,7 @@ class RebrandAndOverlayWiringTest(unittest.TestCase):
         shortcuts = (REPO / 'android/app/src/main/java/com/nx/android/app/GameShortcuts.kt').read_text(encoding='utf-8')
 
         self.assertIn('namespace = "com.nx.android"', gradle)
-        self.assertIn('applicationId = "com.rehan.kcdplay"', gradle)
+        self.assertIn('applicationId = "com.warhome.kcd"', gradle)
         self.assertIn('${applicationId}.ACTION_DEV_LAUNCH', manifest)
         self.assertIn('android:scheme="kcdplay"', manifest)
         self.assertIn('${applicationId}.fileprovider', manifest)

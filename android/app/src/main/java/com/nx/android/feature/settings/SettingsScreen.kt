@@ -58,8 +58,6 @@ import com.nx.android.core.ui.components.ChoiceRow
 import com.nx.android.core.ui.components.CheatsHint
 import com.nx.android.core.ui.components.CheatsRow
 import com.nx.android.core.ui.components.CloseIcon
-import com.nx.android.core.ui.components.FirmwareHint
-import com.nx.android.core.ui.components.FirmwareRow
 import com.nx.android.core.ui.components.Hint
 import com.nx.android.core.ui.components.InfoRow
 import com.nx.android.core.ui.components.NoteRow
@@ -216,16 +214,6 @@ private fun EnvironmentSection(ob: OnboardingState, build: EnvBuildState, action
         enabled = !build.running,
     ) { ob.unpack() }
     KeysRow(actions, onRequest)
-    // 固件：整机级的一份（可选）。导入 zip 解到 App 的私有目录，移植时统一带给移植器
-    FirmwareRow(
-        imported = actions.firmware(),
-        onImport = {
-            onRequest(PickerRequest(PickerMode.FILE, setOf("zip"), null, locale.str(R.string.fw_pick),
-                onPicked = { f -> actions.onImportFirmware(f) }))
-        },
-        onClear = { actions.onClearFirmware() },
-    )
-    FirmwareHint()
     // 金手指：玩家导入的一份（App 不带金手指：社区的 Atmosphère 文件由玩家自己导入）
     CheatsRow(
         games = actions.cheatGames(),
@@ -345,8 +333,6 @@ private fun AboutSection(ob: OnboardingState, update: UpdateViewModel, actions: 
     val locale = LocalAppLocale.current
     // 文件管理器能不能看见 App 的私有目录（运行时、存档、日志）。这一份跟着设置走。
     var fileProviderOn by remember { mutableStateOf(actions.fileProvider()) }
-    var devSyncOn by remember { mutableStateOf(actions.devAutoSync()) }
-    val devPath = remember { DevSync.defaultDevRoot().absolutePath }
 
     // 版本号点一下去 GitHub 仓库
     InfoRow(title = stringResource(R.string.set_version), value = actions.version(), onClick = { openRepo(ctx) })
@@ -380,23 +366,6 @@ private fun AboutSection(ob: OnboardingState, update: UpdateViewModel, actions: 
         label = stringResource(R.string.set_run_onboarding),
         note = stringResource(R.string.set_rerun_onboarding_hint),
     ) { ob.open() }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    SubtitleRow(stringResource(R.string.set_dev_section))
-    SwitchRow(
-        title = stringResource(R.string.set_dev_sync_title),
-        checked = devSyncOn,
-        note = stringResource(R.string.set_dev_sync_note, devPath),
-        onChange = { on ->
-            actions.onSetDevAutoSync(on)
-            devSyncOn = on
-        },
-    )
-    ActionRow(
-        title = stringResource(R.string.set_dev_sync_launch_title),
-        label = stringResource(R.string.set_dev_sync_launch_label),
-        note = stringResource(R.string.set_dev_sync_launch_note),
-        enabled = devSyncOn,
-    ) { actions.onDevSyncAndLaunch() }
 }
 
 /** 语言那一行中间的值：当前是哪一档 */

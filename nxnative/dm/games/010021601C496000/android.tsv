@@ -16,6 +16,7 @@ env	DM_VK_ASYNC_PIPE=0
 env	DM_VK_ORDER_KEEP=0
 env	DM_VK_NAN_SANITIZE=1
 env	DM_VK_EXPAND_320X180=1
+env	DM_VK_C2_FAST=0
 romfs_file	user.cfg	r_ShadersAllowCompilation = 0
 romfs_file	user.cfg	r_ShadersRemoteCompiler = 0
 romfs_file	user.cfg	r_ShaderCompilerDontCache = 0

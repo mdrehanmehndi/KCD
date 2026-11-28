@@ -1185,6 +1185,18 @@ class Port:
             self.dmsv = None
             for st in ('shader split', 'Vulkan shaders'): PROG.stage(st); PROG.end('none: the game renders with OpenGL ES')
             return
+        g_dir = getattr(getattr(self, 'g', None), 'dir', None)
+        prebuilt_dmsv = g_dir / 'prebuilt' / 'shaders.dmsv' if g_dir else None
+        cap = self.aw / 'captured_shaders'
+        has_captures = cap.is_dir() and any(p.is_file() and p.stat().st_size > 0 for p in cap.glob('*.bin'))
+        if prebuilt_dmsv and prebuilt_dmsv.is_file() and not has_captures and os.environ.get('NX2A_NO_PREBUILT') != '1':
+            self.aw.mkdir(parents=True, exist_ok=True)
+            self.dmsv = self.aw / 'shaders.dmsv'
+            PROG.stage('shader split'); PROG.end('prebuilt')
+            PROG.stage('Vulkan shaders')
+            shutil.copyfile(prebuilt_dmsv, self.dmsv)
+            PROG.end(f'{self.dmsv.stat().st_size / 2**20:.1f} MB (prebuilt)')
+            return
         sv = self.versions
         pkg = self.work / 'shader' / 'pkg'
         self.translation_workers()   # no room to translate: say so now, not after the long split
@@ -1298,6 +1310,21 @@ class Port:
 
     # ---- host: the Android host built for this profile with the player's NDK ----
     def host(self):
+        g_dir = getattr(getattr(self, 'g', None), 'dir', None)
+        prebuilt_so = g_dir / 'prebuilt' / 'libdmplay.so' if g_dir else None
+        ndk = self.tools.get('ndk') if getattr(self, 'tools', None) else None
+        if prebuilt_so and prebuilt_so.is_file() and self.o.app and not getattr(self.o, 'debug', False) and (os.environ.get('NX2A_PREBUILT_HOST') == '1' or not ndk):
+            PROG.stage('host', step='prebuilt libdmplay.so')
+            out = self.aw / 'host'
+            out.mkdir(parents=True, exist_ok=True)
+            self.so = out / 'libdmplay.so'
+            shutil.copyfile(prebuilt_so, self.so)
+            ph = out / 'gen' / self.g.id / 'game_profile.h'
+            ph.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run([PY, str(DM / 'games/game.py'), 'header', self.g.id, str(ph)], check=True)
+            self.profile_h = hashlib.sha256(ph.read_bytes()).hexdigest() if ph.is_file() else None
+            PROG.end(f'{self.so.stat().st_size / 2**20:.1f} MB (prebuilt)')
+            return
         PROG.stage('host', step=f'NDK {self.tools["ndk"].name}')
         out = self.aw / ('host-debug' if self.o.debug else 'host')
         # the app's mode runs the game itself: libdmplay.so (the host with the player's JNI entry) instead of the APK's libdmhost.so

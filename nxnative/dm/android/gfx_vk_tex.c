@@ -459,13 +459,17 @@ static vkimg_t *vk_tex_(const tex_t *t) {
     // otherwise only a later nvn_ft_poll pass finds it, and its first draws read zeros
     int nvn_ft_written(const tex_t *);
     if (t->mem && lin_copy(im, t, f)) {}
-    // A key hit can reuse a packaged image for another texture over the same storage. Refresh it only before GPU writes have made the image authoritative.
-    else if (t->mem && (packaged_tex(t) || (im->packaged && !im->gpu_w) || (first && (nvn_ft_written(t) || cpu_content_tex(t, f))))) {
+    // A key hit can reuse a packaged image for another texture over the same storage. Refresh uncompressed images only before GPU writes make them authoritative; compressed textures are never colour render targets and still track CPU uploads.
+    else if (t->mem && (packaged_tex(t) || (im->packaged && (f->compressed || !im->gpu_w)) || (first && (nvn_ft_written(t) || cpu_content_tex(t, f))))) {
         im->pkg_used = g_tex_frame;
         if (!im->packaged) { im->packaged = 1; pkg_upload(im, t, f); }
         else {
             uint64_t now = nvn_dirty_now();
             if (im->pkg_sparse) { if (nvn_sparse_since(t->pool, (uint64_t)(uintptr_t)t->mem, t->L.size, im->pkg_vgen, im->pkg_stamp)) pkg_upload(im, t, f); }   // mapped or written since
+            else if (im->pkg_released) {
+                if ((!im->gpu_w || f->compressed) && pkg_hash(t->mem, t->L.size) != im->pkg_hash) pkg_upload(im, t, f);
+                else { nvn_dirty_protect(t->mem, t->L.size); im->pkg_stamp = nvn_dirty_now(); im->pkg_seen = im->pkg_stamp; im->pkg_released = 0; }
+            }
             else if (now != im->pkg_seen && nvn_dirty_since_span(im->pkg_span, t->mem, t->L.size, im->pkg_stamp)) {   // pages written since the upload
                 // The GPU wrote the image since (a compute shader's image stores, a copy, a render) and its storage still holds the bytes of the upload: the writes were around
                 // it on shared pages, and an upload would put the CPU's bytes over the GPU's. Monster Hunter Rise's spot light profiles (512x1x64 R16F, written by a compute

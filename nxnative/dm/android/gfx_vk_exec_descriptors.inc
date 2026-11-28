@@ -332,7 +332,8 @@ static void cbuf_desc(int st, const vkshader_t *s, const dmsv_bind *b, VkDescrip
                     ubo_log(s, st, b->reg, ua, n); *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[1]++; return;
                 }
             } else {
-                if (e->gen != g) { memset(e->p, 0, sizeof e->p); e->gen = g; }
+                uint32_t g2 = vk_pool_gen() + 1;
+                if (e->gen != g2) { memset(e->p, 0, sizeof e->p); e->gen = g2; }
                 if (p) { memmove(&e->p[1], &e->p[0], 3 * sizeof *e->p); e->p[0] = p; }
             }
         }
@@ -353,10 +354,15 @@ static void cbuf_desc(int st, const vkshader_t *s, const dmsv_bind *b, VkDescrip
         n = p->hi - p->lo - off;
     }
     ubo_log(s, st, b->reg, ua, n);
-    if (vk_ubd_shadow(u->addr, n, &buf, &off)) { *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[2]++; return; }   // deferred updates in it: their shadow
+    if (vk_ubd_shadow(u->addr, n, &buf, &off) || (ua != u->addr && vk_ubd_shadow(ua, n, &buf, &off))) { *bi = (VkDescriptorBufferInfo){buf, off, n}; g_cbpath[2]++; return; }   // deferred updates in it: their shadow
+    VkDeviceSize al = V.props.limits.minUniformBufferOffsetAlignment; if (al < 16) al = 16;
+    VkDeviceSize am = al - 1, mis = off & am;   // (a power of two: a mask, not a division)
+    if (mis) VKRED_ONCE(40, "uniform buffer at an offset not aligned to %llu", (unsigned long long)al);
+    if (off >= mis && p->zero_copy && n <= 65536 &&
+        vk_zcopy_buf_snapshot(ua - mis, n + mis, al, p, g_set_epoch, g_ubd_gen, 0, &buf, &off)) {
+        *bi = (VkDescriptorBufferInfo){buf, off, n + mis}; g_cbpath[1]++; return;
+    }
     g_cbpath[0]++;
-    VkDeviceSize am = V.props.limits.minUniformBufferOffsetAlignment - 1, mis = off & am;   // (a power of two: a mask, not a division)
-    if (mis) VKRED_ONCE(40, "uniform buffer at an offset not aligned to %llu", (unsigned long long)am + 1);
     *bi = (VkDescriptorBufferInfo){buf, p->boff + off - mis, n + mis};   // (off is from the pool's start, its buffer starts boff before it)
 }
 // The set a stage's last draw got, and what it was built from. Between two draws most stages change no texture, sampler, image or storage buffer, only
@@ -387,8 +393,7 @@ static int set_memo_ok(vkshader_t *s) {
     return s->setmemo == 1;
 }
 static int shader_wmem(vkshader_t *s);
-enum { SPARSE_SBUF_CACHE = 32, SPARSE_SBUF_COPY_CAP = 32 * 1024 * 1024 };   // AA456's exhibit shader reads a 24 MiB sparse SSBO; larger snapshots fall back to the zero buffer
-static struct { uint64_t a, n, epoch, gen; VkBuffer buf; VkDeviceSize off; } g_sparse_sbuf[SPARSE_SBUF_CACHE];
+enum { SPARSE_SBUF_COPY_CAP = 32 * 1024 * 1024 };   // AA456's exhibit shader reads a 24 MiB sparse SSBO; larger snapshots fall back to the zero buffer
 static int sparse_sbuf_desc(uint64_t a, uint64_t n, VkDescriptorBufferInfo *bi) {
     if (!a || !n || n > UINT64_MAX - a) return 0;
     uint64_t base = a & ~((uint64_t)SB_ALIGN - 1), size = a + n - base;
@@ -399,15 +404,10 @@ static int sparse_sbuf_desc(uint64_t a, uint64_t n, VkDescriptorBufferInfo *bi) 
         return 0;
     }
     if (size > V.props.limits.maxStorageBufferRange) return 0;
-    uint64_t gen = nvn_sparse_gen(); unsigned k = (unsigned)((a >> 8) ^ (n >> 4)) % SPARSE_SBUF_CACHE;
-    if (g_sparse_sbuf[k].a == base && g_sparse_sbuf[k].n == size && g_sparse_sbuf[k].epoch == g_set_epoch && g_sparse_sbuf[k].gen == gen) {
-        *bi = (VkDescriptorBufferInfo){g_sparse_sbuf[k].buf, g_sparse_sbuf[k].off, size}; return 1;
-    }
     VkBuffer buf; VkDeviceSize off; uint8_t *dst = vk_scratch(size, SB_ALIGN, &buf, &off);
-    uint64_t miss = nvn_sparse_address_copy(base, dst, size);
-    static unsigned notes; if (notes++ < 8) VKLOG("sparse storage buffer snapshot: %#llx + %#llx -> %llu bytes (%llu unmapped), generation %llu",
-        (unsigned long long)base, (unsigned long long)size, (unsigned long long)size, (unsigned long long)miss, (unsigned long long)gen);
-    g_sparse_sbuf[k] = (typeof(g_sparse_sbuf[0])){base, size, g_set_epoch, gen, buf, off};
+    if (!dst) return 0;
+    void vk_ubd_read(uint64_t a, uint64_t n, uint8_t *dst);
+    vk_ubd_read(base, size, dst);
     *bi = (VkDescriptorBufferInfo){buf, off, size}; return 1;
 }
 static uint64_t g_verify_n, g_verify_slot_bad, g_verify_bad;   // DM_VK_X_SETVERIFY checks: made, slot descriptors differing, anything differing

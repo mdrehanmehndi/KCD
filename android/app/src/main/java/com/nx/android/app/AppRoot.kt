@@ -251,29 +251,26 @@ fun AppRoot(
             var driversOpen by remember { mutableStateOf(false) }
             var buildLogId by remember { mutableStateOf("") }
             var envCheckOpen by remember { mutableStateOf(false) }
-            var ossNotice by rememberSaveable { mutableStateOf(false) }
             val ctx = LocalContext.current
             val onboardingViewModel: OnboardingViewModel = hiltViewModel()
             val onboardingUiState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
             val environmentCheckViewModel: EnvironmentCheckViewModel = hiltViewModel()
             val envBuildViewModel: EnvBuildViewModel = hiltViewModel()
-            // 开源声明：引导走完的那一刻弹一次，老用户（早已完成引导）升级后第一次启动也弹；记在 prefs 里，只此一次
-            LaunchedEffect(onboardingUiState.active) {
-                if (!onboardingUiState.active
-                    && prefs.bool(PrefsStore.OB_COMPLETED)
-                    && !prefs.bool(PrefsStore.OSS_NOTICE_SHOWN)
-                ) ossNotice = true
-            }
             Box(Modifier
                 .fillMaxSize()
                 .background(NxPalette.Background)) {
                 if (onboardingUiState.active) {
-                    OnboardingScreen(onboardingViewModel, actions) { pickerReq = it }
+                    OnboardingScreen(
+                        onboardingViewModel,
+                        actions,
+                        onLog = { id -> buildLogId = id },
+                        onRequest = { pickerReq = it },
+                    )
                 } else {
-                    // 这一层之外还盖着东西吗（文件选择器、驱动页、清单、开源声明）：
+                    // 这一层之外还盖着东西吗（文件选择器、驱动页、清单）：
                     // 盖着的时候手柄的键不落到里面的页面上
                     val outerOverlayOpen = pickerReq != null || driversOpen ||
-                            buildLogId.isNotEmpty() || envCheckOpen || ossNotice
+                            buildLogId.isNotEmpty() || envCheckOpen
                     MainScreen(
                         prefs,
                         locale,
@@ -453,48 +450,9 @@ fun AppRoot(
                         latestLength = { actions.buildLogLength(buildLogId) },
                     )
                 }
-                // 开源声明：盖在最后面，玩家先看到它
-                if (ossNotice) {
-                    OpenSourceNoticeDialog(
-                        onClose = {
-                            ossNotice = false
-                            prefs.put(PrefsStore.OSS_NOTICE_SHOWN, true)
-                        },
-                        onRepo = {
-                            openRepo(ctx)
-                            ossNotice = false
-                            prefs.put(PrefsStore.OSS_NOTICE_SHOWN, true)
-                        },
-                    )
-                }
             }
         }
     }
-}
-
-/**
- * 开源声明：这个软件是自由软件（GPL-3.0-or-later），源码在 GitHub 上；花钱买到的请联系卖家退款。
- *
- * 它只出现一次：记在 prefs 里，关掉就不再出现。
- */
-@Composable
-private fun OpenSourceNoticeDialog(onClose: () -> Unit, onRepo: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text(stringResource(R.string.oss_notice_title), fontWeight = FontWeight.Bold) },
-        text = { Text(stringResource(R.string.oss_notice_body)) },
-        confirmButton = {
-            TextButton(onClick = onClose) {
-                Text(
-                    stringResource(R.string.oss_notice_ok),
-                    color = NxPalette.Building
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onRepo) { Text(stringResource(R.string.oss_notice_repo)) }
-        },
-    )
 }
 
 @Composable

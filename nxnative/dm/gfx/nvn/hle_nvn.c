@@ -213,6 +213,7 @@ NVN(nvnMemoryPoolBuilderSetStorage, void, NVNmemoryPoolBuilder *b, void *m, size
 NVN(nvnMemoryPoolBuilderSetFlags, void, NVNmemoryPoolBuilder *b, int f) { ((pool_builder_t *)b)->flags = f; }
 static uint8_t *vpool_reserve(pool_t *o); static uint8_t *vpool_reserve_mode(pool_t *o, int force_sparse); static void vpool_release(pool_t *o);   // sparse virtual pools, see MapVirtual
 static void replay_lock(void); static void replay_unlock(void);   // the replay's state, from a game thread (see "Asynchronous replay")
+static void replay_sync_lock(void); static void replay_sync_unlock(void);   // excludes concurrent submit_now even when replay is synchronous
 static void nvn_drain(void); static int job_wait(uint64_t id, uint64_t timeout_ns); static int nvn_async(void); static int nvn_jobs_wait_queued(uint64_t timeout_ns);   // asynchronous replay (see below)
 __attribute__((weak)) void vk_pool_set_flags(const void *mem, int flags) { (void)mem; (void)flags; }
 __attribute__((weak)) void dm_perf_replay_thread(void) {}   // Android (perf_android.c): the replay thread's CPU placement   // Android's Vulkan host (gfx_vk_core.c): copied pools by their flags
@@ -232,8 +233,8 @@ static void ft_drop(const uint8_t *a, uint64_t n);   // first-touch textures ove
 // right after submitting, and the replay then found its index buffers outside every pool and the command memory overwritten: a black screen, the sound going on)
 NVN(nvnMemoryPoolFinalize, void, NVNmemoryPool *p) { nvn_drain(); if (((pool_t *)p)->flags & 0x200 && ((pool_t *)p)->vp) vpool_release((pool_t *)p);
     if (((pool_t *)p)->mem && !(((pool_t *)p)->flags & 0x200)) {   // A virtual pool's storage is borrowed from a physical pool; do not unregister it
- nvn_dirty_remove_range(((pool_t *)p)->mem); replay_lock(); mtl_pool_del(((pool_t *)p)->mem); replay_unlock(); fl_drop(((pool_t *)p)->mem, ((pool_t *)p)->size); ft_drop(((pool_t *)p)->mem, ((pool_t *)p)->size); }
-    replay_lock(); mtl_alias_drop_pool(p); replay_unlock(); ((pool_t *)p)->magic = 0; }
+ nvn_dirty_remove_range(((pool_t *)p)->mem); replay_sync_lock(); mtl_pool_del(((pool_t *)p)->mem); replay_sync_unlock(); fl_drop(((pool_t *)p)->mem, ((pool_t *)p)->size); ft_drop(((pool_t *)p)->mem, ((pool_t *)p)->size); }
+    replay_sync_lock(); mtl_alias_drop_pool(p); replay_sync_unlock(); ((pool_t *)p)->magic = 0; }
 static void ft_flush(const uint8_t *a, uint64_t n);
 NVN(nvnMemoryPoolFlushMappedRange, void, const NVNmemoryPool *p, ptrdiff_t off, size_t n) {   // see ft_add and nvn_flushed
     const pool_t *o = (const pool_t *)p;
@@ -598,7 +599,7 @@ static void read_texels(const tex_t *o, const view_t *v, const NVNcopyRegion *r,
     if (!row) row = wb;
     if (!img) img = row * hb;
     unsigned level = v && v->set_levels ? (unsigned)v->base_level : 0, layer0 = v && v->set_layers ? (unsigned)v->min_layer : 0;
-    nvn_drain(); replay_lock(); mtl_read_texels(o, level, layer0, r, dst, (size_t)row, (size_t)img); replay_unlock();   // after every submission before it
+    nvn_drain(); replay_sync_lock(); mtl_read_texels(o, level, layer0, r, dst, (size_t)row, (size_t)img); replay_sync_unlock();   // after every submission before it
 }
 NVN(nvnTextureReadTexels, void, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r, void *dst) {
     read_texels(CTX(t), (const view_t *)v, r, dst, 0, 0);
@@ -1421,6 +1422,8 @@ static void nvn_drain(void) { if (nvn_async()) job_wait(g_job_enq, ~0ull); }   /
 static int nvn_jobs_wait_queued(uint64_t timeout_ns) { return job_wait(g_job_enq, timeout_ns); }   // the same for a SyncWait: the fence of a command buffer waits only until the replay thread reaches it
 static void replay_lock(void) { if (nvn_async()) pthread_mutex_lock(&g_sub_mu); }
 static void replay_unlock(void) { if (nvn_async()) pthread_mutex_unlock(&g_sub_mu); }
+static void replay_sync_lock(void) { pthread_mutex_lock(&g_sub_mu); }
+static void replay_sync_unlock(void) { pthread_mutex_unlock(&g_sub_mu); }
 // Under asynchronous replay the game may record into its command memory again before the replay thread reaches what it submitted (Unicorn Overlord's skipped
 // scenes: the replay read overwritten records, "unknown record op", and drew nothing while the sound went on). So each submitted handle is copied whole when it
 // is submitted: JUMPs followed, CALLs inlined, and the pointers a record keeps to its own texture snapshots (tex_snap) moved with it. out NULL: only the size
@@ -2351,7 +2354,7 @@ static void vpool_drop(pool_t *o) {   // caller holds the replay lock and g_vp_m
     for (int i = 0; i < g_nvp; i++) if (g_vp[i] == v) { g_vp[i] = g_vp[--g_nvp]; atomic_fetch_sub_explicit(&g_vp_count, 1, memory_order_release); break; }
     free(v->pt); free(v); o->vp = NULL;
 }
-static void vpool_release(pool_t *o) { replay_lock(); pthread_mutex_lock(&g_vp_mu); vpool_drop(o); pthread_mutex_unlock(&g_vp_mu); replay_unlock(); }
+static void vpool_release(pool_t *o) { replay_sync_lock(); pthread_mutex_lock(&g_vp_mu); vpool_drop(o); pthread_mutex_unlock(&g_vp_mu); replay_sync_unlock(); }
 // Mapped runs of a sparse pool: [lo, hi) sorted, disjoint, adjacent runs merged. Caller holds g_vp_mu
 static void vrun_set(struct vpool *v, uint64_t lo, uint64_t hi, int mapped) {
     uint64_t nl[NVRUN][2]; int nn = 0; uint64_t mlo = lo, mhi = hi;
@@ -2414,14 +2417,14 @@ static int vpool_map(struct vpool *v, const map_req *r) {   // caller holds g_vp
 }
 NVN(nvnMemoryPoolMapVirtual, NVNboolean, NVNmemoryPool *p, int n, const NVNmappingRequest *rq) {
     pool_t *o = (pool_t *)p; const map_req *r = (const map_req *)rq;
-    replay_lock(); pthread_mutex_lock(&g_vp_mu);   // (the replay lock first: the replay thread takes g_vp_mu under it)
+    replay_sync_lock(); pthread_mutex_lock(&g_vp_mu);   // (the replay lock first: the replay thread takes g_vp_mu under it)
     if (o->vp && o->vmode == 0 && n > 0) {   // the first mapping decides (see the sparse pools above)
         if (r[0].phys && r[0].voff == 0 && r[0].size == o->size) { vpool_drop(o); o->mem = NULL; o->vmode = 1; }
         else o->vmode = 2;
     }
     struct vpool *v = o->vmode == 2 ? vpool_of(o) : NULL; int ok = 1;
     for (int i = 0; v && i < n && ok; i++) ok = vpool_map(v, &r[i]);
-    pthread_mutex_unlock(&g_vp_mu); replay_unlock();
+    pthread_mutex_unlock(&g_vp_mu); replay_sync_unlock();
     if (v) return (NVNboolean)ok;
     for (int i = 0; i < n; i++) {
         const pool_t *ph = (const pool_t *)r[i].phys;

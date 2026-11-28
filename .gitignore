@@ -9,6 +9,7 @@
 *.apk
 *.spv
 *.dmsv
+!nxnative/dm/games/*/prebuilt/*.dmsv
 __pycache__/
 
 # Debug symbols: they embed the build machine's local paths and nothing else

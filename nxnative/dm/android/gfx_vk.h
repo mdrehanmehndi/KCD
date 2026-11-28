@@ -92,6 +92,7 @@ uint64_t nvn_sparse_gen(void);   // mapping generation shared by the sparse pool
 int nvn_sparse_address_translate(uint64_t addr, uint64_t len, uint64_t *physical);   // a contiguous mapped guest range → its physical pool address
 uint64_t nvn_sparse_address_copy(uint64_t addr, void *dst, uint64_t len);   // copy sparse guest bytes through the page table; unmapped pages read as zero
 int vk_sparse_buf_snapshot(uint64_t addr, uint64_t len, VkDeviceSize align, VkBuffer *buf, VkDeviceSize *off);   // copy a non-contiguous sparse buffer range into submission scratch
+int vk_zcopy_buf_snapshot(uint64_t addr, uint64_t len, VkDeviceSize align, const vkpool_t *p, uint64_t epoch, uint64_t ubd_gen, int dynamic_only, VkBuffer *buf, VkDeviceSize *off);   // copy a CPU-written zero-copy buffer range into submission scratch to isolate post-submit CPU writes
 int vk_sub_open(void);                 // a submission is being recorded
 VkCommandBuffer vk_upload_cmd(void);   // the current submission's upload command buffer (runs before the main one)
 void *vk_scratch(VkDeviceSize n, VkDeviceSize align, VkBuffer *buf, VkDeviceSize *off);   // host-visible memory that lives until this submission completes

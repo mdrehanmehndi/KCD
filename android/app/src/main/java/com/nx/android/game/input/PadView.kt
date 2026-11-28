@@ -249,6 +249,16 @@ class PadView(context: Context, private val prefs: PrefsStore, private val pack:
         loadTheme()
     }
 
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (!hasWindowFocus) {
+            router.release()
+            lastButtons = 0L
+            runCatching { Native.padInput(0, 0, 0, 0, 0, out.ids, out.xs, out.ys) }
+            invalidate()
+        }
+    }
+
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         if (w > 0 && h > 0 && (w != ow || h != oh)) fetchLayout()   // 尺寸一变（旋转/满屏切换）重拉布局
@@ -297,7 +307,7 @@ class PadView(context: Context, private val prefs: PrefsStore, private val pack:
         val ctrls = answerControls()
         // actionMasked，不是 action：getAction() 给的是「动作 | 手指下标 << 8」的合成值，
         // 第二根手指的 POINTER_DOWN 是 261 而不是 5，路由就认不出来（那样两个键不能一起按）
-        router.route(e.actionMasked, e.actionIndex, tIds, tXs, tYs, n, ctrls, height.toFloat(), out)
+        router.route(e.actionMasked, e.actionIndex, tIds, tXs, tYs, n, ctrls, height.toFloat(), out, width.toFloat())
         // 菜单按钮：拖动就是挪按钮（立刻存进宿主的布局），点按就是开抽屉
         if (router.menuPointer >= 0) {
             val i = tIds.indexOf(router.menuPointer)
@@ -512,7 +522,7 @@ class PadView(context: Context, private val prefs: PrefsStore, private val pack:
         buildCtlIndex()
     }
 
-    /** 当前风格的主题从哪来：自带 = 数据包的 overlay/，默认 = app 里的默认主题包 */
+    /** 当前风格的主题从哪来：自带 = 数据包的 overlay/，默认 = 极简透明中性矢量（无蓝光贴图） */
     private fun themeSource(): ThemeSource? = when (styleState) {
         PadStyle.PACK -> pack?.let { p ->
             ThemeSource(
@@ -520,18 +530,7 @@ class PadView(context: Context, private val prefs: PrefsStore, private val pack:
                 atlas = { name -> BitmapFactory.decodeFile(File(File(p, "overlay"), name).absolutePath) },
             )
         }
-        PadStyle.DEFAULT -> ThemeSource(
-            text = {
-                runCatching {
-                    this.context.assets.open("$DEFAULT_THEME_DIR/theme.tsv").use { it.readBytes().toString(Charsets.UTF_8) }
-                }.onFailure { Log.w(TAG, "the default theme pack is not in the assets ($DEFAULT_THEME_DIR): $it") }.getOrNull()
-            },
-            atlas = { name ->
-                runCatching {
-                    this.context.assets.open("$DEFAULT_THEME_DIR/$name").use { BitmapFactory.decodeStream(it) }
-                }.onFailure { Log.w(TAG, "the default theme pack has no $name: $it") }.getOrNull()
-            },
-        )
+        PadStyle.DEFAULT -> null
     }
 
     /** 读主题：自带读数据包自带的 overlay/，默认读 app 里的默认主题包；都没有就走矢量退路 */
@@ -637,21 +636,69 @@ class PadView(context: Context, private val prefs: PrefsStore, private val pack:
             return
         }
 
-        // 矢量退路（包里没有主题时）
+        // Clean minimal translucent neutral vector style (no bluish glow)
+        var drewLeftStick = false
+        var drewRightStick = false
         for ((i, c) in ctrls.withIndex()) {
             if (c.hidden && !editing) continue
+            val f = if (c.hidden) GHOST_ALPHA else 1f
+            if (c.isStick && !editing) {
+                val isRight = c.name == "stick_r"
+                if (isRight) drewRightStick = true else drewLeftStick = true
+                val active = router.isStickActive(isRight)
+                val cx = if (active) router.stickAnchorX(isRight) else c.cx * H
+                val cy = if (active) router.stickAnchorY(isRight) else c.cy * H
+                val rr = c.hw * H
+                val vis = if (active) a * f else a * f * 0.45f
+                fill.color = Color.argb(((if (active) 28 else 10) * vis).toInt().coerceIn(0, 255), 255, 255, 255)
+                canvas.drawCircle(cx, cy, rr, fill)
+                line.color = Color.argb(((if (active) 190 else 120) * vis).toInt().coerceIn(0, 255), 255, 255, 255)
+                line.strokeWidth = max(2f, H * 0.0025f)
+                canvas.drawCircle(cx, cy, rr, line)
+                val ki = if (isRight) 2 else 0
+                val tx = cx + router.knobs[ki] * rr
+                val ty = cy + router.knobs[ki + 1] * rr
+                val tr = if (active) rr * 0.42f else rr * 0.24f
+                fill.color = Color.argb(((if (active) 95 else 45) * vis).toInt().coerceIn(0, 255), 255, 255, 255)
+                canvas.drawCircle(tx, ty, tr, fill)
+                continue
+            }
             val cx = c.cx * H; val cy = c.cy * H; val rr = c.hw * H
             val held = pressed.contains(i)
-            val f = if (c.hidden) GHOST_ALPHA else 1f
-            fill.color = Color.argb(((if (held) 55 else 25) * a * f).toInt(), 255, 255, 255)
+            fill.color = Color.argb(((if (held) 75 else 20) * a * f).toInt().coerceIn(0, 255), 255, 255, 255)
             canvas.drawCircle(cx, cy, rr, fill)
-            line.color = Color.argb((190 * a * f).toInt(), 255, 255, 255); line.strokeWidth = 2.5f
+            line.color = Color.argb(((if (held) 225 else 145) * a * f).toInt().coerceIn(0, 255), 255, 255, 255)
+            line.strokeWidth = max(2f, H * 0.0025f)
             canvas.drawCircle(cx, cy, rr, line)
-            if (!c.hidden) {   // 幽灵的名字由它的虚线框那里写（这里就别写两遍了）
-                text.color = Color.argb((220 * a).toInt(), 255, 255, 255)
+            if (!c.hidden) {
+                text.color = Color.argb(((if (held) 245 else 200) * a).toInt().coerceIn(0, 255), 255, 255, 255)
                 canvas.drawText(label(c.name), cx, cy + text.textSize / 3, text)
             }
         }
+        if (!editing) {
+            if (!drewLeftStick && router.isStickActive(false)) {
+                drawDynamicStick(canvas, ctrls, H, a, false)
+            }
+            if (!drewRightStick && router.isStickActive(true)) {
+                drawDynamicStick(canvas, ctrls, H, a, true)
+            }
+        }
+    }
+
+    private fun drawDynamicStick(canvas: Canvas, ctrls: List<PadControl>, H: Float, a: Float, isRight: Boolean) {
+        val cx = router.stickAnchorX(isRight)
+        val cy = router.stickAnchorY(isRight)
+        val rr = router.stickRadius(isRight, ctrls, H)
+        val ki = if (isRight) 2 else 0
+        fill.color = Color.argb((28 * a).toInt().coerceIn(0, 255), 255, 255, 255)
+        canvas.drawCircle(cx, cy, rr, fill)
+        line.color = Color.argb((190 * a).toInt().coerceIn(0, 255), 255, 255, 255)
+        line.strokeWidth = max(2f, H * 0.0025f)
+        canvas.drawCircle(cx, cy, rr, line)
+        val tx = cx + router.knobs[ki] * rr
+        val ty = cy + router.knobs[ki + 1] * rr
+        fill.color = Color.argb((95 * a).toInt().coerceIn(0, 255), 255, 255, 255)
+        canvas.drawCircle(tx, ty, rr * 0.42f, fill)
     }
 
     /** 一个控件的不透明度：藏起来的（编辑器里的幽灵）只有一小半亮 */

@@ -119,7 +119,7 @@ class KcdProfilesTest(unittest.TestCase):
             env = set(ap.env)
             for req in ('DM_VK_FRONT=2', 'DM_GPU_TURBO=1', 'DM_VK_CB_DRAWS=0', 'DM_VK_ASYNC_PIPE=0',
                         'DM_VK_ORDER_KEEP=0', 'DM_VK_NAN_SANITIZE=1', 'DM_VK_EXPAND_320X180=1',
-                        'DM_FPS_TARGET=60', 'DM_ADAPTIVE_FPS=0'):
+                        'DM_VK_C2_FAST=0', 'DM_FPS_TARGET=60', 'DM_ADAPTIVE_FPS=0'):
                 self.assertIn(req, env, f'{tid}: missing {req}')
             cfg = ap.romfs_files.get('user.cfg', '')
             self.assertIn('r_DynamicResolution = 0', cfg)
@@ -398,6 +398,126 @@ class AppCaptureRebuildTest(unittest.TestCase):
                 pack_base=str(data_dir),
             )
             self.assertTrue((data_dir / 'captured_shaders' / '0123456789abcdef.bin').is_file())
+
+
+@unittest.skipUnless(shutil.which('cc'), 'host C compiler required')
+class ZcopySnapshotTest(unittest.TestCase):
+    def test_snapshot_isolates_cpu_writes_and_skips_gpu_pending(self):
+        src = (REPO / 'nxnative/dm/android/gfx_vk_core.c').read_text(encoding='utf-8')
+        s0 = src.index('static int zcopy_snap_on(void)')
+        s1 = src.index('\nvoid mtl_sub_index(', s0)
+        fn = src[s0:s1]
+
+        c_src = r'''
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+typedef uint64_t VkDeviceSize;
+typedef uint64_t VkBuffer;
+typedef struct { uint64_t lo, hi, base, end; int zero_copy, flags; } vkpool_t;
+static int g_uncached = 0, g_pending = 0;
+static uint64_t g_gpuw_gen = 1, g_allocs = 0;
+static uint8_t g_scratch_mem[4][256];
+static int zc_uncached(void) { return g_uncached; }
+static int vk_gpu_pending(uint64_t a, uint64_t n) { (void)a; (void)n; return g_pending; }
+static void *vk_scratch(VkDeviceSize n, VkDeviceSize align, VkBuffer *buf, VkDeviceSize *off) {
+    (void)n; (void)align;
+    uint64_t i = g_allocs++;
+    *buf = 0x1000ull + i;
+    *off = 64ull * (i + 1);
+    return g_scratch_mem[i % 4];
+}
+static void vk_ubd_read(uint64_t a, uint64_t n, uint8_t *dst) {
+    memcpy(dst, (const void *)(uintptr_t)a, n);
+}
+''' + fn + r'''
+int main(void) {
+    static uint8_t pool_mem[4096];
+    for (int i = 0; i < 64; i++) pool_mem[i] = (uint8_t)(i + 1);
+    uint64_t base = (uint64_t)(uintptr_t)pool_mem;
+    vkpool_t static_p = {base, base + sizeof pool_mem, base, base + (32u << 20), 1, 0x4};
+    vkpool_t dyn_p = {base, base + sizeof pool_mem, base, base + (8u << 20), 1, 0x4};
+    VkBuffer b1 = 0, b2 = 0, b3 = 0; VkDeviceSize o1 = 0, o2 = 0, o3 = 0;
+
+    /* 1. Force (UBO) snapshot isolates CPU overwrite after submit */
+    assert(vk_zcopy_buf_snapshot(base, 64, 64, &static_p, 1, 1, 0, &b1, &o1) == 1);
+    assert(b1 == 0x1000ull && o1 == 64 && g_allocs == 1);
+    /* Deduplicated hit within same epoch/ubd/gpuw */
+    assert(vk_zcopy_buf_snapshot(base, 64, 64, &static_p, 1, 1, 0, &b2, &o2) == 1);
+    assert(b2 == b1 && o2 == o1 && g_allocs == 1);
+    /* CPU overwrites pool memory afterwards -> scratch still holds original bytes */
+    memset(pool_mem, 0, 64);
+    assert(g_scratch_mem[0][0] == 1 && g_scratch_mem[0][63] == 64);
+
+    /* 2. dynamic_only skips >16MiB cached static pool, snapshots <=16MiB pool */
+    assert(vk_zcopy_buf_snapshot(base + 128, 64, 16, &static_p, 1, 1, 1, &b3, &o3) == 0);
+    assert(vk_zcopy_buf_snapshot(base + 128, 64, 16, &dyn_p, 1, 1, 1, &b3, &o3) == 1);
+    assert(g_allocs == 2);
+
+    /* 3. GPU-pending write skips snapshot, and g_gpuw_gen invalidates prior cache */
+    g_pending = 1;
+    assert(vk_zcopy_buf_snapshot(base, 64, 64, &static_p, 1, 1, 0, &b3, &o3) == 0);
+    g_pending = 0; g_gpuw_gen++;
+    assert(vk_zcopy_buf_snapshot(base, 64, 64, &static_p, 1, 1, 0, &b3, &o3) == 1);
+    assert(g_allocs == 3);
+
+    /* 4. Bounds past chunk p->hi, CPU_NO_ACCESS (0x1), and >65792 bytes skip cleanly */
+    assert(vk_zcopy_buf_snapshot(base + sizeof pool_mem - 32, 64, 16, &static_p, 1, 1, 0, &b3, &o3) == 0);
+    vkpool_t no_cpu_p = {base, base + sizeof pool_mem, base, base + (8u << 20), 1, 0x1};
+    assert(vk_zcopy_buf_snapshot(base, 64, 64, &no_cpu_p, 1, 1, 0, &b3, &o3) == 0);
+    assert(vk_zcopy_buf_snapshot(base, 65793u, 64, &static_p, 1, 1, 0, &b3, &o3) == 0);
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as td:
+            src_p = Path(td) / 'zcs_test.c'
+            exe_p = Path(td) / 'zcs_test'
+            src_p.write_text(c_src, encoding='utf-8')
+            comp = subprocess.run([shutil.which('cc'), '-O2', '-Wall', '-Wextra', str(src_p), '-o', str(exe_p)],
+                                  capture_output=True, text=True)
+            self.assertEqual(comp.returncode, 0, comp.stderr)
+            run = subprocess.run([str(exe_p)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+
+class PrebuiltKcdArtifactsTest(unittest.TestCase):
+    def test_both_title_ids_carry_prebuilt_shaders_and_play_lib_and_pipeline_uses_them(self):
+        for tid in ('010021601C496000', '0100650018FE0000'):
+            pre = REPO / 'nxnative/dm/games' / tid / 'prebuilt'
+            dmsv = pre / 'shaders.dmsv'
+            so = pre / 'libdmplay.so'
+            self.assertTrue(dmsv.is_file(), f'missing {dmsv}')
+            self.assertTrue(so.is_file(), f'missing {so}')
+            self.assertEqual(dmsv.read_bytes()[:4], b'DMSV')
+            self.assertEqual(so.read_bytes()[:4], b'\x7fELF')
+
+        import importlib.util
+        if importlib.util.find_spec('lz4') is None:
+            self.skipTest('lz4 required for porter.pipeline')
+        if str(REPO) not in sys.path:
+            sys.path.insert(0, str(REPO))
+        from types import SimpleNamespace
+        from porter.pipeline import Port
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            port = Port.__new__(Port)
+            port.o = SimpleNamespace(app=True, debug=False, install=False, device=None, out=None)
+            port.tools = {}
+            port.cfg = {}
+            port.g = game.load('0100650018FE0000')
+            port.aw = root / 'work/0100650018FE0000_build/android'
+
+            port.shaders()
+            self.assertEqual(port.dmsv, port.aw / 'shaders.dmsv')
+            self.assertEqual(port.dmsv.read_bytes()[:4], b'DMSV')
+
+            port.host()
+            self.assertEqual(port.so, port.aw / 'host/libdmplay.so')
+            self.assertEqual(port.so.read_bytes()[:4], b'\x7fELF')
+            self.assertTrue(port.profile_h)
 
 
 if __name__ == '__main__':

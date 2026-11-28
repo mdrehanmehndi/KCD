@@ -57,7 +57,6 @@ object EnvCheck {
     ): Chip = when {
         preparing -> Chip.PREPARING
         !envReady || !keysOk -> Chip.NOT_READY
-        !firmwareImported -> Chip.HINT
         !profilesImported -> Chip.HINT
         phantom == PhantomCheck.Status.ON || phantom == PhantomCheck.Status.UNKNOWN -> Chip.HINT
         else -> Chip.READY

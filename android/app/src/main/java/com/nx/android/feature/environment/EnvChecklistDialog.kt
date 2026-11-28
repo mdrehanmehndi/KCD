@@ -133,16 +133,6 @@ fun EnvChecklistDialog(
                         action = if (state.keysOk) null else stringResource(R.string.common_modify),
                         onAction = onPickKeys,
                     )
-                    // 固件：整机级的一份，可选项（只有读主机系统数据的游戏才需要）
-                    CheckLine(
-                        stringResource(R.string.fw_title),
-                        if (firmware.isNotBlank()) EnvCheck.Level.OK else EnvCheck.Level.HINT,
-                        if (firmware.isNotBlank()) firmware else stringResource(R.string.fw_not_imported),
-                        action = if (firmware.isNotBlank()) null else stringResource(R.string.fw_import),
-                        onAction = onImportFirmware,
-                    )
-                    // 这一行下面说明它是干什么的：光写「没导入」，玩家不知道要不要管它
-                    if (firmware.isBlank()) FirmwareHint()
                     // 游戏档案：App 不带档案（几百 MB 的着色器表），玩家自己导入一份
                     CheckLine(
                         stringResource(R.string.profiles_title),

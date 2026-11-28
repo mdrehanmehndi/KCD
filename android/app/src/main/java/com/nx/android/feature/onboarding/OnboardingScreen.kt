@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nx.android.R
 import com.nx.android.app.AppActions
@@ -36,19 +37,27 @@ import com.nx.android.core.ui.components.QuietButton
 import com.nx.android.core.ui.theme.NxPalette
 import com.nx.android.domain.ObStep
 import com.nx.android.domain.OnboardingLogic
+import com.nx.android.feature.builds.BuildsRoute
+import com.nx.android.feature.builds.BuildsViewModel
 import com.nx.android.feature.filepicker.PickerMode
 import com.nx.android.feature.filepicker.PickerRequest
 
 /**
- * The guided setup, five steps: the permission and the space, the environment's unpack, the keys, the games'
- * folder, done. The gates are OnboardingLogic's; this view only draws and sends intents.
+ * The guided setup, five steps: the permission and the space, the environment's unpack, the keys, ready,
+ * and the build screen. The gates are OnboardingLogic's; this view only draws and sends intents.
  *
  * 这一层是有状态的（它读 ViewModel，把动作接上）；画的那部分在 [OnboardingContent] 里，是无状态的，
  * 所以预览可以拿假状态单独看它。
  */
 @Composable
-fun OnboardingScreen(viewModel: OnboardingViewModel, actions: AppActions, onRequest: (PickerRequest) -> Unit) {
+fun OnboardingScreen(
+    viewModel: OnboardingViewModel,
+    actions: AppActions,
+    onLog: (String) -> Unit = {},
+    onRequest: (PickerRequest) -> Unit,
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val buildsViewModel: BuildsViewModel = hiltViewModel()
     val locale = LocalAppLocale.current
 
     // the back key walks the flow backwards, it does not leave the app
@@ -77,6 +86,19 @@ fun OnboardingScreen(viewModel: OnboardingViewModel, actions: AppActions, onRequ
                     onPicked = { f -> actions.onImportFirmware(f) }))
             },
         ),
+        buildContent = {
+            BuildsRoute(
+                viewModel = buildsViewModel,
+                keys = uiState.facts.keysPath,
+                envReady = uiState.facts.envReady,
+                actions = actions,
+                onRequest = onRequest,
+                onLog = onLog,
+                onOpenProfiles = {},
+                onOpenGameList = {},
+                agentVisible = false,
+            )
+        },
     )
 }
 
@@ -101,7 +123,11 @@ internal data class OnboardingActions(
  * 无状态——只有 [uiState] 与动作；闸门（这一步能不能往下走）是纯函数算的。
  */
 @Composable
-internal fun OnboardingContent(uiState: OnboardingUiState, actions: OnboardingActions) {
+internal fun OnboardingContent(
+    uiState: OnboardingUiState,
+    actions: OnboardingActions,
+    buildContent: @Composable () -> Unit = {},
+) {
     val can = OnboardingLogic.canAct(uiState.step, uiState.facts)
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp),
@@ -111,7 +137,7 @@ internal fun OnboardingContent(uiState: OnboardingUiState, actions: OnboardingAc
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(stepTitle(uiState.step), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(stringResource(R.string.onb_step_of, uiState.step.ordinal + 1, ObStep.entries.size - 1),
+                Text(stringResource(R.string.onb_step_of, uiState.step.ordinal + 1, ObStep.entries.size),
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -134,16 +160,21 @@ internal fun OnboardingContent(uiState: OnboardingUiState, actions: OnboardingAc
         }
 
         Box(Modifier.weight(1f)) {
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when (uiState.step) {
-                    ObStep.WELCOME -> WelcomeStep(uiState.facts, actions.onAskStorage, actions.onAskBattery)
-                    ObStep.ENV -> EnvStep(uiState, actions.onUnpack)
-                    ObStep.KEYS -> KeysStep(uiState, actions.onChooseKeysFile, actions.onKeysSkippedChange,
-                        actions.firmware, actions.onChooseFirmwareFile)
-                    ObStep.DONE -> DoneStep()
+            if (uiState.step == ObStep.BUILD) {
+                buildContent()
+            } else {
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    when (uiState.step) {
+                        ObStep.WELCOME -> WelcomeStep(uiState.facts, actions.onAskStorage, actions.onAskBattery)
+                        ObStep.ENV -> EnvStep(uiState, actions.onUnpack)
+                        ObStep.KEYS -> KeysStep(uiState, actions.onChooseKeysFile, actions.onKeysSkippedChange,
+                            actions.firmware, actions.onChooseFirmwareFile)
+                        ObStep.DONE -> DoneStep()
+                        ObStep.BUILD -> Unit
+                    }
                 }
             }
         }
@@ -157,7 +188,7 @@ internal fun OnboardingContent(uiState: OnboardingUiState, actions: OnboardingAc
             Spacer(Modifier.weight(1f))
             CapsuleButton(
                 text = primaryLabel(uiState.step, can),
-                onClick = { if (uiState.step == ObStep.DONE) actions.onOpenLibrary() else actions.onNext() },
+                onClick = { if (uiState.step == ObStep.BUILD) actions.onOpenLibrary() else actions.onNext() },
                 enabled = can,
             )
         }
@@ -170,6 +201,7 @@ private fun stepTitle(s: ObStep): String = when (s) {
     ObStep.ENV -> stringResource(R.string.onb_prepare_env)
     ObStep.KEYS -> "prod.keys"
     ObStep.DONE -> stringResource(R.string.onb_all_ready)
+    ObStep.BUILD -> stringResource(R.string.tab_builds)
 }
 
 @Composable
@@ -177,7 +209,8 @@ private fun primaryLabel(s: ObStep, can: Boolean): String = when (s) {
     ObStep.WELCOME -> stringResource(R.string.common_start)
     ObStep.ENV -> if (can) stringResource(R.string.common_continue) else stringResource(R.string.onb_waiting_env)
     ObStep.KEYS -> if (can) stringResource(R.string.common_continue) else stringResource(R.string.onb_waiting_check)
-    ObStep.DONE -> stringResource(R.string.onb_enter_library)
+    ObStep.DONE -> stringResource(R.string.common_continue)
+    ObStep.BUILD -> stringResource(R.string.onb_enter_library)
 }
 
 /** 预览：第一步（权限与空间） */

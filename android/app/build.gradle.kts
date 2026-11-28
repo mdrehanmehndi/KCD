@@ -115,7 +115,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.rehan.kcdplay"
+        applicationId = "com.warhome.kcd"
         minSdk = 26
         // SDK 29 from the platform enforces W^X for app data: the guest programs under files/rootfs could not
         // be exec'd at all. The app is not on Google Play (it ships as an APK from the project's releases).

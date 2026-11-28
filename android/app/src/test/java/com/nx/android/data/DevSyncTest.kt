@@ -194,8 +194,8 @@ class DevSyncTest {
 
     @Test
     fun `applicationId launch wiring and saveEnvToggles update both pack and dev env`() {
-        assertEquals("com.rehan.kcdplay", com.nx.android.BuildConfig.APPLICATION_ID)
-        assertEquals("com.rehan.kcdplay.ACTION_DEV_LAUNCH", DevSync.ACTION_LAUNCH)
+        assertEquals("com.warhome.kcd", com.nx.android.BuildConfig.APPLICATION_ID)
+        assertEquals("com.warhome.kcd.ACTION_DEV_LAUNCH", DevSync.ACTION_LAUNCH)
         assertEquals("kcdplay", DevSync.SCHEME_LAUNCH)
         assertEquals("dev_replay", DevSync.EXTRA_DEV_REPLAY)
 

@@ -536,7 +536,9 @@ static slab_t *slab_new(int c) {   // a slab of class c, allocated and imported 
     if (ok) {
         VkMemoryDedicatedAllocateInfo ded = {VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, NULL, VK_NULL_HANDLE, s->buf};
         VkImportAndroidHardwareBufferInfoANDROID imp = {VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID, &ded, s->ahb};
-        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &imp, ap.allocationSize, vk_mem_type(ap.memoryTypeBits, 0, 0)};
+        uint32_t mt = vk_mem_type(ap.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+        if (mt == UINT32_MAX) mt = vk_mem_type(ap.memoryTypeBits, 0, 0);
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &imp, ap.allocationSize, mt};
         ok = !vkAllocateMemory(V.dev, &ai, NULL, &s->mem);
         if (ok && vkBindBufferMemory(V.dev, s->buf, s->mem, 0)) { vkFreeMemory(V.dev, s->mem, NULL); ok = 0; }
         if (!ok) vkDestroyBuffer(V.dev, s->buf, NULL);
@@ -682,7 +684,9 @@ static int pool_zero_copy(vkpool_t *p, uint8_t *mem, uint64_t size, int lazy, co
     else {
         VkMemoryDedicatedAllocateInfo ded = {VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, NULL, VK_NULL_HANDLE, p->buf};   // the driver requires a dedicated allocation for an imported AHardwareBuffer
         VkImportAndroidHardwareBufferInfoANDROID imp = {VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID, &ded, ahb};
-        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &imp, ap.allocationSize, vk_mem_type(ap.memoryTypeBits, 0, 0)};
+        uint32_t mt = vk_mem_type(ap.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+        if (mt == UINT32_MAX) mt = vk_mem_type(ap.memoryTypeBits, 0, 0);
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &imp, ap.allocationSize, mt};
         if ((vr = vkAllocateMemory(V.dev, &ai, NULL, &p->mem))) { mem_diag_zc(9, "vkAllocateMemory", size, "VkResult", vr); p->mem = VK_NULL_HANDLE; }
         else if ((vr = vkBindBufferMemory(V.dev, p->buf, p->mem, 0))) { mem_diag_zc(10, "vkBindBufferMemory", size, "VkResult", vr); vkFreeMemory(V.dev, p->mem, NULL); p->mem = VK_NULL_HANDLE; }   // (as slab_new)
         if (vr) { vkDestroyBuffer(V.dev, p->buf, NULL); p->buf = VK_NULL_HANDLE; }
@@ -1057,11 +1061,11 @@ again:   // (pool_back found another pool in the entry: the one looked up was re
     if (!r)   // not in that one: the scan as before (pools over the same memory, and the range across two chunks it reports)
         for (int i = 0; i < g_npool; i++) if (addr >= g_pool[i].lo && addr + len <= g_pool[i].hi) { r = &g_pool[i]; break; }
                                            else if (addr >= g_pool[i].lo && addr < g_pool[i].hi && addr + len <= g_pool[i].end) across = 1;
-    if (r) { serial = r->serial; lazy = __atomic_load_n(&r->lazy, __ATOMIC_ACQUIRE); if (lazy == 1 && r->lazy_at && pool_ns() < r->lazy_at) lazy = 2; }
+    if (r) { serial = r->serial; lazy = __atomic_load_n(&r->lazy, __ATOMIC_ACQUIRE); if (lazy == 1 && r->lazy_at && pool_ns() < r->lazy_at) lazy = 2; g = __atomic_load_n(&g_pool_gen, __ATOMIC_ACQUIRE) + 1; }
     pthread_rwlock_unlock(&g_pool_mu);
     if (lazy && !back) return r;   // (not kept in the cache, which holds pools with their buffer)
     if (lazy == 2) r = NULL;   // its buffer could not be made (pool_back said why), for now or for good
-    else if (lazy) { int b = pool_back(r, serial); if (b > 0) goto again; if (b) r = NULL; }
+    else if (lazy) { int b = pool_back(r, serial); if (b > 0) goto again; if (b) r = NULL; else g = __atomic_load_n(&g_pool_gen, __ATOMIC_ACQUIRE) + 1; }
     if (r && back && !__atomic_load_n(&r->used, __ATOMIC_RELAXED) && !__atomic_exchange_n(&r->used, 1, __ATOMIC_RELAXED)) __atomic_fetch_add(&g_used_bytes, r->hi - r->lo, __ATOMIC_RELAXED);
     if (r) { if (c.gen != g) { memset(&c, 0, sizeof c); c.gen = g; } c.p[ck] = r; memmove(&c.last[1], &c.last[0], 3 * sizeof *c.last); c.last[0] = r; }
     if (!r && across) { static uint64_t n; uint64_t k = ++n; if (!(k & (k - 1))) LOG("[RED] [vk] %llu ranges across two chunks of a memory pool (DM_VK_ZC_CHUNK_MB; this one %#llx +%#llx): no buffer for them", (unsigned long long)k, (unsigned long long)addr, (unsigned long long)len); }
@@ -1696,7 +1700,22 @@ void vk_ubd_land(VkCommandBuffer cb) {   // outside a render pass
     vk_img_barrier_all(cb);
     for (int i = 0; i < g_nubd; i++) {
         uint64_t dst = g_ubd[i].lo, n = g_ubd[i].hi - dst; VkBuffer db; VkDeviceSize dof;
-        if (nvn_sparse_address_pool(dst, n) && !nvn_sparse_address_translate(dst, n, &dst)) { vk_readback_unknown(); continue; }
+        if (nvn_sparse_address_pool(dst, n)) {
+            if (nvn_sparse_address_translate(dst, n, &dst) && vk_buf_at(dst, n, &db, &dof)) {
+                VkBufferCopy r = {g_ubd[i].so, dof, n}; vkCmdCopyBuffer(cb, g_ubd[i].sb, db, 1, &r); sub_gpu_wrote(dst, n);
+                continue;
+            }
+            uint64_t v = g_ubd[i].lo;
+            for (uint64_t done = 0; done < n; ) {
+                uint64_t ch = 0x1000 - ((v + done) & 0xFFF); if (ch > n - done) ch = n - done;
+                uint64_t pa = 0;
+                if (nvn_sparse_address_translate(v + done, ch, &pa) && vk_buf_at(pa, ch, &db, &dof)) {
+                    VkBufferCopy r = {g_ubd[i].so + done, dof, ch}; vkCmdCopyBuffer(cb, g_ubd[i].sb, db, 1, &r); sub_gpu_wrote(pa, ch);
+                } else vk_readback_unknown();
+                done += ch;
+            }
+            continue;
+        }
         if (vk_buf_at(dst, n, &db, &dof)) {
             VkBufferCopy r = {g_ubd[i].so, dof, n}; vkCmdCopyBuffer(cb, g_ubd[i].sb, db, 1, &r); sub_gpu_wrote(dst, n);
             continue;
@@ -1713,7 +1732,7 @@ int vk_ubd_overlaps(uint64_t a, uint64_t n) { for (int i = 0; i < g_nubd; i++) i
 // GPU writes to pool memory (buffer copies and fills, texture → buffer copies, storage buffers of dispatches) whose submission may not have completed:
 // until it has, a CPU read of that memory (vk_ubd_read: a shadow, a handle in a uniform buffer) may see the bytes from before them or after them
 typedef struct { uint64_t lo, hi, fence; } gpuw_t;
-static gpuw_t *g_gw; static size_t g_ngw, g_cgw; uint64_t g_ubd_racy;
+static gpuw_t *g_gw; static size_t g_ngw, g_cgw; uint64_t g_ubd_racy; static uint64_t g_gpuw_gen = 1;
 int g_vk_cpu_ready = 1;   // refreshed by replay at each submission (DM_VK_CPU_READY)
 static void sub_gpu_wrote(uint64_t a, uint64_t n) {   // into the open submission's list (pools_copy_back)
     if (g_cur < 0 || !n) return;
@@ -1748,6 +1767,7 @@ void vk_gpu_wrote(uint64_t a, uint64_t n) {
         g_gw = next; g_cgw = capacity;
     }
     g_gw[g_ngw++] = (gpuw_t){a, a + n, f};
+    g_gpuw_gen++;
     sub_gpu_wrote(a, n);
 }
 int vk_gpu_pending(uint64_t a, uint64_t n) {
@@ -1829,17 +1849,36 @@ int vk_ubd_shadow(uint64_t a, uint64_t n, VkBuffer *buf, VkDeviceSize *off) {
 int vk_sparse_buf_snapshot(uint64_t addr, uint64_t len, VkDeviceSize align, VkBuffer *buf, VkDeviceSize *off) {
     if (!addr || !len || len > 32u * 1024u * 1024u || len > UINT64_MAX - addr || !nvn_sparse_address_pool(addr, 1)) return 0;
     if (align < 16) align = 16;
-    enum { SC = 32 };
-    static struct { uint64_t a, n, f, sgen, ubd; VkDeviceSize al; VkBuffer b; VkDeviceSize o; } cache[SC];
-    uint64_t sub = g_fence + 1, sg = nvn_sparse_gen();
-    unsigned k = (unsigned)((addr >> 8) ^ (len >> 4)) % SC;
-    if (cache[k].a == addr && cache[k].n == len && cache[k].al == align && cache[k].f == sub && cache[k].sgen == sg && cache[k].ubd == g_ubd_gen) {
-        *buf = cache[k].b; *off = cache[k].o; return 1;
-    }
     uint8_t *dst = vk_scratch(len, align, buf, off);
     if (!dst) return 0;
     vk_ubd_read(addr, len, dst);
-    cache[k] = (typeof(cache[0])){addr, len, sub, sg, g_ubd_gen, align, *buf, *off};
+    return 1;
+}
+static int zcopy_snap_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("DM_VK_ZCOPY_SNAPSHOT"); on = e && *e ? atoi(e) != 0 : !zc_uncached(); }
+    return on;
+}
+int vk_zcopy_buf_snapshot(uint64_t addr, uint64_t len, VkDeviceSize align, const vkpool_t *p, uint64_t epoch, uint64_t ubd_gen, int dynamic_only, VkBuffer *buf, VkDeviceSize *off) {
+    if (!zcopy_snap_on() || !addr || !len || len > 65792u || len > UINT64_MAX - addr || !p || !p->zero_copy || (p->flags & 0x1)) return 0;
+    if (dynamic_only && !(p->flags & 0x2) && (p->end - p->base > (16u << 20))) return 0;
+    if (addr < p->lo || addr + len > p->hi) return 0;
+    if (vk_gpu_pending(addr, len)) return 0;
+    if (align < 16) align = 16;
+    enum { ZCS = 4096 };
+    static struct { uint64_t a, n, ep, ubd, gpuw; VkDeviceSize al; VkBuffer b; VkDeviceSize o; } zcs[ZCS];
+    static uint64_t zcs_ep, zcs_bytes;
+    if (zcs_ep != epoch) { zcs_ep = epoch; zcs_bytes = 0; }
+    unsigned k = (unsigned)(((addr >> 4) * 0x9E3779B97F4A7C15ull ^ (len >> 2)) >> 52) % ZCS;
+    if (zcs[k].a == addr && zcs[k].n == len && zcs[k].al == align && zcs[k].ep == epoch && zcs[k].ubd == ubd_gen && zcs[k].gpuw == g_gpuw_gen) {
+        *buf = zcs[k].b; *off = zcs[k].o; return 1;
+    }
+    if (zcs_bytes + len > (32u << 20)) return 0;
+    uint8_t *dst = vk_scratch(len, align, buf, off);
+    if (!dst) return 0;
+    vk_ubd_read(addr, len, dst);
+    zcs_bytes += len;
+    zcs[k] = (typeof(zcs[0])){addr, len, epoch, ubd_gen, g_gpuw_gen, align, *buf, *off};
     return 1;
 }
 void mtl_sub_index(const uint64_t *h, int n) { (void)h; (void)n; }

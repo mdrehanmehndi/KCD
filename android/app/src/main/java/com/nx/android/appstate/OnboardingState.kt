@@ -83,7 +83,7 @@ class OnboardingState @Inject constructor(
     }
 
     fun next() {
-        if (!OnboardingLogic.canAdvance(step, facts()) || step >= ObStep.DONE) return
+        if (!OnboardingLogic.canAdvance(step, facts()) || step >= ObStep.BUILD) return
         step = ObStep.entries[step.ordinal + 1]
         saveStep()
         enter()
